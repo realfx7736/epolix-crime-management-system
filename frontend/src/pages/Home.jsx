@@ -455,7 +455,10 @@ export default function Home() {
                             use our prioritized emergency response protocols.
                         </p>
                         <div className="flex flex-col sm:flex-row gap-6 justify-center">
-                            <button className="bg-rose-600 hover:bg-rose-700 text-white px-10 py-5 rounded-2xl font-bold text-xl shadow-xl shadow-rose-900/40 transition-all transform hover:scale-105">
+                            <button
+                                onClick={() => window.location.href = 'tel:112'}
+                                className="bg-rose-600 hover:bg-rose-700 text-white px-10 py-5 rounded-2xl font-bold text-xl shadow-xl shadow-rose-900/40 transition-all transform hover:scale-105"
+                            >
                                 Dial 112 Now
                             </button>
                             <button className="glass bg-white/5 px-10 py-5 rounded-2xl font-bold text-xl hover:bg-white/10 transition-all">

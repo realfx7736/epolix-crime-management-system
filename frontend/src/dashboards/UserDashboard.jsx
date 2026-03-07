@@ -135,7 +135,11 @@ const UserDashboard = () => {
         setTimeout(() => { setReportSubmitted(false); setShowReportModal(false); setReportForm({ crimeType: "", location: "", date: "", description: "", evidence: null }); }, 2500);
     };
 
-    const handleEmergency = () => { setShowEmergency(true); setTimeout(() => setShowEmergency(false), 5000); };
+    const handleEmergency = () => {
+        setShowEmergency(true);
+        window.location.href = 'tel:112';
+        setTimeout(() => setShowEmergency(false), 5000);
+    };
 
     const unreadCount = notifications.filter(n => n.unread).length;
 
