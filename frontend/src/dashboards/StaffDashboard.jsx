@@ -50,7 +50,13 @@ const StaffDashboard = () => {
     const [compList, setCompList] = useState(complaints);
     const [stats, setStats] = useState({ total: 48, pending: 12, verified: 28, fir: 8, filed: 36 });
 
+    // Staff Info
+    const [staff, setStaff] = useState({ fullName: "Staff Sita R.", staffId: "STF-901", department: "Data Entry & Case Processing", role: "Clerk" });
+
     useEffect(() => {
+        const storedUser = localStorage.getItem('user');
+        if (storedUser) setStaff(JSON.parse(storedUser));
+
         const iv = setInterval(() => setStats(p => ({ ...p, total: p.total + (Math.random() > 0.8 ? 1 : 0) })), 9000);
         return () => clearInterval(iv);
     }, []);
@@ -364,9 +370,9 @@ const StaffDashboard = () => {
                 <div className="p-2.5 border-t border-white/5">
                     <div className="flex items-center gap-2.5 px-2.5 py-2 mb-1.5">
                         <div className="w-7 h-7 rounded-lg bg-emerald-500/15 flex items-center justify-center text-emerald-400 border border-emerald-400/15"><User size={13} /></div>
-                        <div><div className="text-[11px] font-bold text-slate-300">Staff Sita R.</div><div className="text-[8px] text-slate-600">STF-901</div></div>
+                        <div><div className="text-[11px] font-bold text-slate-300">{staff.fullName}</div><div className="text-[8px] text-slate-600">ID: {staff.staffId}</div></div>
                     </div>
-                    <button onClick={() => navigate("/")} className="sd-nav-btn text-red-400 hover:bg-red-500/10 w-full"><LogOut size={15} /> Sign Out</button>
+                    <button onClick={() => { localStorage.clear(); navigate("/"); }} className="sd-nav-btn text-red-400 hover:bg-red-500/10 w-full"><LogOut size={15} /> Sign Out</button>
                 </div>
             </aside>
 
@@ -374,7 +380,7 @@ const StaffDashboard = () => {
                 <div className="sd-topbar">
                     <div className="flex items-center gap-3">
                         <button onClick={() => setSideOpen(!sideOpen)} className="lg:hidden text-slate-400"><Menu size={20} /></button>
-                        <div><h1 className="text-sm font-bold text-white">Staff Workspace</h1><p className="text-[9px] text-slate-600">Data Entry & Case Processing · <Lock size={8} className="inline" /> Secure</p></div>
+                        <div><h1 className="text-sm font-bold text-white">Staff Workspace</h1><p className="text-[9px] text-slate-600">{staff.department} · {staff.role} · <Lock size={8} className="inline" /> Terminal Online</p></div>
                     </div>
                     <div className="flex items-center gap-2.5">
                         <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/5 text-slate-500 font-mono text-xs"><Clock size={12} className="text-emerald-400 animate-pulse" />{new Date().toLocaleTimeString()}</div>

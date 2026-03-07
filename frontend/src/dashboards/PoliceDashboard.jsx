@@ -67,7 +67,13 @@ const PoliceDashboard = () => {
 
     // Live counters
     const [liveStats, setLiveStats] = useState({ pending: 14, investigating: 23, onsite: 5, closed: 187 });
+    // Officer Info
+    const [officer, setOfficer] = useState({ fullName: "SI Vikram Rathore", policeId: "OFF-110", station: "Saket Division", rank: "SI" });
+
     useEffect(() => {
+        const storedUser = localStorage.getItem('user');
+        if (storedUser) setOfficer(JSON.parse(storedUser));
+
         const iv = setInterval(() => {
             setLiveStats(p => ({
                 pending: p.pending + (Math.random() > 0.7 ? 1 : 0),
@@ -544,11 +550,11 @@ const PoliceDashboard = () => {
                             <User size={14} />
                         </div>
                         <div>
-                            <div className="text-xs font-bold text-slate-300">SI Vikram Rathore</div>
-                            <div className="text-[9px] text-slate-600">Badge: OFF-110</div>
+                            <div className="text-xs font-bold text-slate-300">{officer.fullName}</div>
+                            <div className="text-[9px] text-slate-600">ID: {officer.policeId}</div>
                         </div>
                     </div>
-                    <button onClick={() => navigate("/")} className="pd-nav-btn text-red-400 hover:bg-red-500/10 w-full">
+                    <button onClick={() => { localStorage.clear(); navigate("/"); }} className="pd-nav-btn text-red-400 hover:bg-red-500/10 w-full">
                         <LogOut size={16} /> Sign Out
                     </button>
                 </div>
@@ -561,7 +567,7 @@ const PoliceDashboard = () => {
                         <button onClick={() => setSidebarOpen(!sidebarOpen)} className="lg:hidden text-slate-400"><Menu size={20} /></button>
                         <div>
                             <h1 className="text-base font-bold text-white">Officer Command Center</h1>
-                            <p className="text-[10px] text-slate-600">SI Vikram Rathore · Saket Division · <Lock size={9} className="inline" /> Secure</p>
+                            <p className="text-[10px] text-slate-600">{officer.fullName} · {officer.station} · <Lock size={9} className="inline" /> Terminal Online</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-3">

@@ -2,32 +2,57 @@ const express = require('express');
 const router = express.Router();
 const authController = require('../controllers/authController');
 const { authenticate } = require('../middleware/auth');
-const { validate, registerSchema, loginSchema, otpVerifySchema } = require('../middleware/validator');
-const rateLimit = require('express-rate-limit');
+const { authorize } = require('../middleware/rbac');
+const { authLimiter, otpLimiter, adminAuthLimiter } = require('../middleware/rateLimiter');
 
-// Rate limiting for auth routes
-const authLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 20,
-    message: { success: false, message: 'Too many attempts. Please try again after 15 minutes.' }
-});
+// ─── Public Routes ─────────────────────────────────────────────────────────
 
-// ---- Public Routes ----
-router.post('/register', authLimiter, validate(registerSchema), authController.register);
-router.post('/login', authLimiter, validate(loginSchema), authController.login);
-router.post('/verify-otp', authLimiter, validate(otpVerifySchema), authController.verifyOTP);
+// Citizen Aadhaar login
+router.post('/citizen/login', authLimiter, authController.citizenLogin);
 
-// Citizen Specific Aadhaar Auth
-router.post('/citizen/aadhaar', authLimiter, authController.citizenAadhaarStep1);
-router.post('/citizen/verify-otp', authLimiter, authController.citizenVerifyOTP);
+// Terminal login (Police / Staff / Admin)
+router.post('/terminal/login', authLimiter, authController.terminalLogin);
 
-router.post('/refresh-token', authController.refreshToken);
+// Admin-specific login (extra strict limiter)
+router.post('/admin/login', adminAuthLimiter, authController.terminalLogin);
 
-// ---- Protected Routes ----
+// OTP verification (all roles)
+router.post('/verify-otp', otpLimiter, authController.verifyOTP);
+
+// Legacy OTP route for backward compatibility
+router.post('/citizen/verify-otp', otpLimiter, authController.verifyOTP);
+router.post('/terminal/verify-otp', otpLimiter, authController.verifyOTP);
+
+// Seed endpoint (secured in production)
+router.post('/seed', authController.seedDatabase);
+
+// ─── Protected Routes ──────────────────────────────────────────────────────
+
+// Get own profile (any authenticated role)
 router.get('/profile', authenticate, authController.getProfile);
-router.put('/profile', authenticate, authController.updateProfile);
 
-// ---- Dev/Admin Route ----
-router.get('/seed', authController.seedDatabase);
+// Register Police Officer (Admin only)
+router.post(
+    '/register/police',
+    authenticate,
+    authorize('admin', 'super_admin'),
+    authController.registerPoliceOfficer
+);
+
+// Register Staff Member (Admin only)
+router.post(
+    '/register/staff',
+    authenticate,
+    authorize('admin', 'super_admin'),
+    authController.registerStaff
+);
+
+// Register Admin (Super Admin only)
+router.post(
+    '/register/admin',
+    authenticate,
+    authorize('super_admin'),
+    authController.registerAdmin
+);
 
 module.exports = router;
