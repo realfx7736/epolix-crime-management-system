@@ -1,0 +1,160 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Outfit', sans-serif;
+  --neon-blue: #00d4ff;
+  --neon-red: #ff3366;
+  --neon-green: #00ff88;
+  --neon-amber: #ffaa00;
+  --dark-bg: #0a0e1a;
+  --dark-card: #0f1629;
+  --dark-surface: #141b2d;
+  --glass-border: rgba(0, 212, 255, 0.15);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--dark-bg);
+  color: #e2e8f0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Glassmorphism Cards */
+.glass-card {
+  background: rgba(15, 22, 41, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: 1.25rem;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-card:hover {
+  border-color: rgba(0, 212, 255, 0.35);
+  box-shadow: 0 0 30px rgba(0, 212, 255, 0.08), inset 0 0 30px rgba(0, 212, 255, 0.03);
+}
+
+.glass-card-red {
+  background: rgba(255, 51, 102, 0.06);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 51, 102, 0.2);
+  border-radius: 1.25rem;
+}
+
+/* Neon Glow Effects */
+.neon-blue-glow {
+  box-shadow: 0 0 15px rgba(0, 212, 255, 0.3), 0 0 45px rgba(0, 212, 255, 0.1);
+}
+.neon-red-glow {
+  box-shadow: 0 0 15px rgba(255, 51, 102, 0.3), 0 0 45px rgba(255, 51, 102, 0.1);
+}
+.neon-text-blue {
+  color: var(--neon-blue);
+  text-shadow: 0 0 10px rgba(0, 212, 255, 0.5);
+}
+.neon-text-red {
+  color: var(--neon-red);
+  text-shadow: 0 0 10px rgba(255, 51, 102, 0.5);
+}
+
+/* Pulse Ring Animation */
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 1; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+.pulse-ring::before {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 2px solid var(--neon-red);
+  animation: pulse-ring 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Radar Scan */
+@keyframes radar-scan {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+.radar-sweep {
+  animation: radar-scan 3s linear infinite;
+}
+
+/* Scanline */
+@keyframes scanline {
+  0% { top: 0; }
+  100% { top: 100%; }
+}
+.scanline-effect::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--neon-blue), transparent);
+  opacity: 0.15;
+  animation: scanline 4s linear infinite;
+  pointer-events: none;
+}
+
+/* Data Stream */
+@keyframes data-stream {
+  0% { transform: translateY(-100%); opacity: 0; }
+  50% { opacity: 1; }
+  100% { transform: translateY(100%); opacity: 0; }
+}
+
+/* Evidence Flicker */
+@keyframes evidence-flicker {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+/* Grid Background */
+.grid-bg {
+  background-image:
+    linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Status Badges */
+.status-pending { background: rgba(255, 170, 0, 0.15); color: #ffaa00; border: 1px solid rgba(255, 170, 0, 0.3); }
+.status-investigating { background: rgba(0, 212, 255, 0.15); color: #00d4ff; border: 1px solid rgba(0, 212, 255, 0.3); }
+.status-resolved { background: rgba(0, 255, 136, 0.15); color: #00ff88; border: 1px solid rgba(0, 255, 136, 0.3); }
+
+/* Custom Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--dark-bg); }
+::-webkit-scrollbar-thumb { background: rgba(0, 212, 255, 0.3); border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 212, 255, 0.5); }
+
+/* Float Animation */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+.animate-float { animation: float 3s ease-in-out infinite; }
+
+/* Typing cursor */
+@keyframes blink-cursor {
+  0%, 100% { border-color: var(--neon-blue); }
+  50% { border-color: transparent; }
+}
+
+/* Progress bar shimmer */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.shimmer-bar {
+  background: linear-gradient(90deg, transparent, rgba(0,212,255,0.3), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 2s infinite;
+}

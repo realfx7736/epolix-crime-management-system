@@ -1,0 +1,44 @@
+{
+  "users": [
+    {
+      "name": "Super Admin",
+      "email": "admin@epolix.gov.in",
+      "phone": "9999999999",
+      "deptId": "ADMIN-001",
+      "role": "admin",
+      "password": "$2b$10$fgkMKU4UXM9r8m/ershI7u58hkzM6wRD7bESdNyBCwrgsXVSwOGNe",
+      "verified": true,
+      "_id": "37eyb4rmf"
+    },
+    {
+      "name": "Inspector Vikram",
+      "email": "vikram@police.gov.in",
+      "phone": "8888888888",
+      "deptId": "POLICE-001",
+      "role": "police",
+      "password": "$2b$10$fgkMKU4UXM9r8m/ershI7u/1xXlYEza498AwiFbsq/GbYxA5pA6hW",
+      "verified": true,
+      "_id": "z6phyifpk"
+    },
+    {
+      "name": "Staff Rahul",
+      "email": "rahul@staff.gov.in",
+      "phone": "7777777777",
+      "deptId": "STAFF-001",
+      "role": "staff",
+      "password": "$2b$10$fgkMKU4UXM9r8m/ershI7up888UBur69uN6vJ5OE/P/KXq5LY2tpK",
+      "verified": true,
+      "_id": "nwr1ftz7u"
+    }
+  ],
+  "cases": [
+    {
+      "caseId": "EPLX1772641851387",
+      "complaint": "FROM HOME: a murder",
+      "status": "Registered",
+      "reportedBy": "pranav (9846295489)",
+      "timestamp": "2026-03-04T16:30:51.387Z",
+      "_id": "1772641851388"
+    }
+  ]
+}

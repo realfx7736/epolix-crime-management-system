@@ -1,0 +1,342 @@
+/* ===== ADMIN DASHBOARD STYLES ===== */
+
+.ad-sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 264px;
+    background: rgba(6, 8, 18, 0.97);
+    border-right: 1px solid rgba(255, 51, 102, 0.08);
+    backdrop-filter: blur(30px);
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.3s ease;
+}
+
+.ad-sidebar-header {
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid rgba(255, 51, 102, 0.08);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.ad-sidebar-nav {
+    flex: 1;
+    padding: 0.5rem 0.6rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.ad-nav-label {
+    padding: 0.9rem 0.85rem 0.35rem;
+    font-size: 8px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.25em;
+    color: #1e293b;
+}
+
+.ad-nav-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.6rem 0.8rem;
+    border-radius: 0.65rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: #475569;
+    font-weight: 600;
+    font-size: 0.78rem;
+    border: 1px solid transparent;
+    position: relative;
+    background: none;
+    width: 100%;
+    text-align: left;
+}
+
+.ad-nav-btn:hover {
+    background: rgba(255, 51, 102, 0.04);
+    color: #94a3b8;
+}
+
+.ad-nav-btn.active {
+    background: rgba(255, 51, 102, 0.08);
+    color: #ff3366;
+    border-color: rgba(255, 51, 102, 0.15);
+}
+
+.ad-nav-btn.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 20%;
+    bottom: 20%;
+    width: 3px;
+    background: #ff3366;
+    border-radius: 0 4px 4px 0;
+    box-shadow: 0 0 12px rgba(255, 51, 102, 0.6);
+}
+
+.ad-nav-btn .ad-badge {
+    margin-left: auto;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 700;
+}
+
+.ad-main {
+    margin-left: 264px;
+    min-height: 100vh;
+}
+
+.ad-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: rgba(6, 8, 18, 0.85);
+    backdrop-filter: blur(24px);
+    border-bottom: 1px solid rgba(255, 51, 102, 0.06);
+    padding: 0.65rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* Stat cards with accent top borders */
+.ad-stat {
+    position: relative;
+    overflow: hidden;
+}
+
+.ad-stat::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+}
+
+.ad-stat.red::after {
+    background: linear-gradient(90deg, transparent, #ff3366, transparent);
+}
+
+.ad-stat.blue::after {
+    background: linear-gradient(90deg, transparent, #00d4ff, transparent);
+}
+
+.ad-stat.green::after {
+    background: linear-gradient(90deg, transparent, #00ff88, transparent);
+}
+
+.ad-stat.amber::after {
+    background: linear-gradient(90deg, transparent, #ffaa00, transparent);
+}
+
+.ad-stat.purple::after {
+    background: linear-gradient(90deg, transparent, #a855f7, transparent);
+}
+
+/* User management table */
+.ad-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.ad-table th {
+    padding: 0.7rem 0.85rem;
+    text-align: left;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.15em;
+    color: #334155;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.ad-table td {
+    padding: 0.65rem 0.85rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    font-size: 0.8rem;
+}
+
+.ad-table tr:hover {
+    background: rgba(255, 255, 255, 0.015);
+}
+
+/* Chart bars */
+.ad-chart-bar {
+    border-radius: 3px 3px 0 0;
+    position: relative;
+    transition: height 0.5s ease;
+}
+
+.ad-chart-bar::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent);
+}
+
+/* Donut chart CSS */
+.ad-donut {
+    width: 140px;
+    height: 140px;
+    border-radius: 50%;
+    position: relative;
+}
+
+.ad-donut-center {
+    position: absolute;
+    inset: 20px;
+    border-radius: 50%;
+    background: #0a0e1a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+}
+
+/* Map for admin */
+.ad-map {
+    position: relative;
+    height: 300px;
+    border-radius: 0.85rem;
+    overflow: hidden;
+    background: radial-gradient(ellipse at 50% 50%, rgba(255, 51, 102, 0.03) 0%, #0a0e1a 75%);
+    border: 1px solid rgba(255, 51, 102, 0.08);
+}
+
+.ad-map-grid {
+    position: absolute;
+    inset: 0;
+    background-image:
+        linear-gradient(rgba(255, 51, 102, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 51, 102, 0.03) 1px, transparent 1px);
+    background-size: 30px 30px;
+}
+
+.ad-map-pin {
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.ad-map-pin:hover {
+    transform: scale(1.6);
+}
+
+.ad-map-pin::after {
+    content: '';
+    position: absolute;
+    inset: -5px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    opacity: 0.3;
+    animation: pulse-ring 2s infinite;
+}
+
+/* Input for admin forms */
+.ad-input {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 51, 102, 0.12);
+    border-radius: 0.6rem;
+    padding: 0.6rem 0.8rem;
+    color: #e2e8f0;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.8rem;
+    outline: none;
+    transition: border-color 0.3s;
+}
+
+.ad-input:focus {
+    border-color: rgba(255, 51, 102, 0.4);
+    box-shadow: 0 0 12px rgba(255, 51, 102, 0.08);
+}
+
+.ad-input::placeholder {
+    color: #1e293b;
+}
+
+/* Admin primary button */
+.ad-btn {
+    background: linear-gradient(135deg, #cc0033, #ff3366);
+    border: none;
+    color: white;
+    font-weight: 700;
+    padding: 0.6rem 1.5rem;
+    border-radius: 0.6rem;
+    cursor: pointer;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.8rem;
+    transition: all 0.3s;
+}
+
+.ad-btn:hover {
+    box-shadow: 0 0 20px rgba(255, 51, 102, 0.3);
+    transform: translateY(-1px);
+}
+
+.ad-btn.secondary {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.ad-btn.secondary:hover {
+    background: rgba(255, 255, 255, 0.1);
+    box-shadow: none;
+}
+
+/* Modal */
+.ad-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(8px);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ad-modal {
+    background: #0d1321;
+    border: 1px solid rgba(255, 51, 102, 0.15);
+    border-radius: 1.25rem;
+    width: 90%;
+    max-width: 600px;
+    max-height: 85vh;
+    overflow-y: auto;
+    padding: 2rem;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+    .ad-sidebar {
+        transform: translateX(-100%);
+    }
+
+    .ad-sidebar.open {
+        transform: translateX(0);
+    }
+
+    .ad-main {
+        margin-left: 0;
+    }
+}

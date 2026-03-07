@@ -1,0 +1,245 @@
+/* ===== STAFF DASHBOARD STYLES ===== */
+.sd-sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 260px;
+    background: rgba(6, 10, 22, 0.97);
+    border-right: 1px solid rgba(0, 212, 255, 0.08);
+    backdrop-filter: blur(30px);
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.3s;
+}
+
+.sd-sidebar-header {
+    padding: 1.2rem 1.4rem;
+    border-bottom: 1px solid rgba(0, 212, 255, 0.08);
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+}
+
+.sd-sidebar-nav {
+    flex: 1;
+    padding: 0.5rem 0.6rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.sd-nav-label {
+    padding: 0.85rem 0.8rem 0.3rem;
+    font-size: 8px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.2em;
+    color: #1e293b;
+}
+
+.sd-nav-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.6rem 0.8rem;
+    border-radius: 0.65rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: #475569;
+    font-weight: 600;
+    font-size: 0.8rem;
+    border: 1px solid transparent;
+    position: relative;
+    background: none;
+    width: 100%;
+    text-align: left;
+}
+
+.sd-nav-btn:hover {
+    background: rgba(0, 212, 255, 0.04);
+    color: #94a3b8;
+}
+
+.sd-nav-btn.active {
+    background: rgba(16, 185, 129, 0.1);
+    color: #10b981;
+    border-color: rgba(16, 185, 129, 0.2);
+}
+
+.sd-nav-btn.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 20%;
+    bottom: 20%;
+    width: 3px;
+    background: #10b981;
+    border-radius: 0 4px 4px 0;
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.6);
+}
+
+.sd-nav-btn .sd-badge {
+    margin-left: auto;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 700;
+}
+
+.sd-main {
+    margin-left: 260px;
+    min-height: 100vh;
+}
+
+.sd-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: rgba(6, 10, 22, 0.85);
+    backdrop-filter: blur(24px);
+    border-bottom: 1px solid rgba(16, 185, 129, 0.06);
+    padding: 0.65rem 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.sd-stat {
+    position: relative;
+    overflow: hidden;
+}
+
+.sd-stat::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+}
+
+.sd-stat.emerald::after {
+    background: linear-gradient(90deg, transparent, #10b981, transparent);
+}
+
+.sd-stat.blue::after {
+    background: linear-gradient(90deg, transparent, #00d4ff, transparent);
+}
+
+.sd-stat.red::after {
+    background: linear-gradient(90deg, transparent, #ff3366, transparent);
+}
+
+.sd-stat.amber::after {
+    background: linear-gradient(90deg, transparent, #ffaa00, transparent);
+}
+
+.sd-input {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(16, 185, 129, 0.12);
+    border-radius: 0.6rem;
+    padding: 0.6rem 0.8rem;
+    color: #e2e8f0;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.8rem;
+    outline: none;
+    transition: border-color 0.3s;
+}
+
+.sd-input:focus {
+    border-color: rgba(16, 185, 129, 0.4);
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.08);
+}
+
+.sd-input::placeholder {
+    color: #1e293b;
+}
+
+.sd-btn {
+    background: linear-gradient(135deg, #059669, #10b981);
+    border: none;
+    color: white;
+    font-weight: 700;
+    padding: 0.6rem 1.5rem;
+    border-radius: 0.6rem;
+    cursor: pointer;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.8rem;
+    transition: all 0.3s;
+}
+
+.sd-btn:hover {
+    box-shadow: 0 0 20px rgba(16, 185, 129, 0.3);
+    transform: translateY(-1px);
+}
+
+.sd-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.sd-table th {
+    padding: 0.65rem 0.8rem;
+    text-align: left;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: #334155;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.sd-table td {
+    padding: 0.6rem 0.8rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+    font-size: 0.78rem;
+}
+
+.sd-table tr:hover {
+    background: rgba(255, 255, 255, 0.015);
+}
+
+.sd-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(8px);
+    z-index: 100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.sd-modal {
+    background: #0d1321;
+    border: 1px solid rgba(16, 185, 129, 0.15);
+    border-radius: 1.25rem;
+    width: 90%;
+    max-width: 600px;
+    max-height: 85vh;
+    overflow-y: auto;
+    padding: 1.75rem;
+}
+
+@media(max-width:1024px) {
+    .sd-sidebar {
+        transform: translateX(-100%);
+    }
+
+    .sd-sidebar.open {
+        transform: translateX(0);
+    }
+
+    .sd-main {
+        margin-left: 0;
+    }
+}

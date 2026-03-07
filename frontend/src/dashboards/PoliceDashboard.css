@@ -1,0 +1,379 @@
+/* ===== POLICE OFFICER DASHBOARD STYLES ===== */
+
+/* Sidebar */
+.pd-sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 270px;
+    background: rgba(8, 12, 24, 0.97);
+    border-right: 1px solid rgba(0, 212, 255, 0.08);
+    backdrop-filter: blur(30px);
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    transition: transform 0.3s ease;
+}
+
+.pd-sidebar-header {
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid rgba(0, 212, 255, 0.08);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.pd-sidebar-nav {
+    flex: 1;
+    padding: 0.75rem;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.pd-nav-section {
+    padding: 1rem 1rem 0.4rem;
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.25em;
+    color: #334155;
+}
+
+.pd-nav-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.65rem 0.85rem;
+    border-radius: 0.7rem;
+    cursor: pointer;
+    transition: all 0.25s;
+    color: #475569;
+    font-weight: 600;
+    font-size: 0.82rem;
+    border: 1px solid transparent;
+    position: relative;
+    background: none;
+    width: 100%;
+    text-align: left;
+}
+
+.pd-nav-btn:hover {
+    background: rgba(0, 212, 255, 0.04);
+    color: #94a3b8;
+}
+
+.pd-nav-btn.active {
+    background: rgba(0, 212, 255, 0.08);
+    color: #00d4ff;
+    border-color: rgba(0, 212, 255, 0.15);
+}
+
+.pd-nav-btn.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 20%;
+    bottom: 20%;
+    width: 3px;
+    background: #00d4ff;
+    border-radius: 0 4px 4px 0;
+    box-shadow: 0 0 12px rgba(0, 212, 255, 0.6);
+}
+
+.pd-nav-btn .pd-badge {
+    margin-left: auto;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+/* Main Content */
+.pd-main {
+    margin-left: 270px;
+    min-height: 100vh;
+    position: relative;
+}
+
+/* Top Bar */
+.pd-topbar {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+    background: rgba(8, 12, 24, 0.85);
+    backdrop-filter: blur(24px);
+    border-bottom: 1px solid rgba(0, 212, 255, 0.06);
+    padding: 0.7rem 1.75rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+/* Stat Cards */
+.pd-stat-card {
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s;
+}
+
+.pd-stat-card::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+}
+
+.pd-stat-card.blue::after {
+    background: linear-gradient(90deg, transparent, #00d4ff, transparent);
+}
+
+.pd-stat-card.red::after {
+    background: linear-gradient(90deg, transparent, #ff3366, transparent);
+}
+
+.pd-stat-card.green::after {
+    background: linear-gradient(90deg, transparent, #00ff88, transparent);
+}
+
+.pd-stat-card.amber::after {
+    background: linear-gradient(90deg, transparent, #ffaa00, transparent);
+}
+
+/* Priority Badges */
+.pd-priority-critical {
+    background: rgba(255, 51, 102, 0.15);
+    color: #ff3366;
+    border: 1px solid rgba(255, 51, 102, 0.3);
+}
+
+.pd-priority-high {
+    background: rgba(255, 100, 50, 0.15);
+    color: #ff6432;
+    border: 1px solid rgba(255, 100, 50, 0.3);
+}
+
+.pd-priority-medium {
+    background: rgba(255, 170, 0, 0.15);
+    color: #ffaa00;
+    border: 1px solid rgba(255, 170, 0, 0.3);
+}
+
+.pd-priority-low {
+    background: rgba(0, 255, 136, 0.15);
+    color: #00ff88;
+    border: 1px solid rgba(0, 255, 136, 0.3);
+}
+
+/* Investigation status */
+.pd-status-registered {
+    background: rgba(148, 163, 184, 0.1);
+    color: #94a3b8;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+}
+
+.pd-status-investigating {
+    background: rgba(0, 212, 255, 0.12);
+    color: #00d4ff;
+    border: 1px solid rgba(0, 212, 255, 0.25);
+}
+
+.pd-status-onsite {
+    background: rgba(255, 170, 0, 0.12);
+    color: #ffaa00;
+    border: 1px solid rgba(255, 170, 0, 0.25);
+}
+
+.pd-status-closed {
+    background: rgba(0, 255, 136, 0.12);
+    color: #00ff88;
+    border: 1px solid rgba(0, 255, 136, 0.25);
+}
+
+/* Case Detail Panel */
+.pd-case-detail {
+    position: fixed;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 440px;
+    background: rgba(10, 14, 26, 0.97);
+    border-left: 1px solid rgba(0, 212, 255, 0.1);
+    backdrop-filter: blur(30px);
+    z-index: 60;
+    overflow-y: auto;
+    padding: 2rem;
+}
+
+/* Map Container */
+.pd-map {
+    position: relative;
+    height: 340px;
+    border-radius: 1rem;
+    overflow: hidden;
+    background: radial-gradient(ellipse at 40% 50%, rgba(0, 212, 255, 0.04) 0%, #0a0e1a 80%);
+    border: 1px solid rgba(0, 212, 255, 0.08);
+}
+
+.pd-map-grid {
+    position: absolute;
+    inset: 0;
+    background-image:
+        linear-gradient(rgba(0, 212, 255, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 212, 255, 0.04) 1px, transparent 1px);
+    background-size: 28px 28px;
+}
+
+.pd-map-marker {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.pd-map-marker:hover {
+    transform: scale(1.5);
+}
+
+.pd-map-marker::after {
+    content: '';
+    position: absolute;
+    inset: -5px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    opacity: 0.4;
+    animation: pulse-ring 2s infinite;
+}
+
+.pd-map-marker.critical {
+    background: #ff3366;
+    color: #ff3366;
+    box-shadow: 0 0 14px rgba(255, 51, 102, 0.6);
+}
+
+.pd-map-marker.high {
+    background: #ff6432;
+    color: #ff6432;
+    box-shadow: 0 0 14px rgba(255, 100, 50, 0.5);
+}
+
+.pd-map-marker.medium {
+    background: #ffaa00;
+    color: #ffaa00;
+    box-shadow: 0 0 14px rgba(255, 170, 0, 0.5);
+}
+
+.pd-map-marker.low {
+    background: #00ff88;
+    color: #00ff88;
+    box-shadow: 0 0 14px rgba(0, 255, 136, 0.5);
+}
+
+/* Evidence grid */
+.pd-evidence-thumb {
+    border-radius: 0.75rem;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    aspect-ratio: 1;
+    background: rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all 0.3s;
+    position: relative;
+}
+
+.pd-evidence-thumb:hover {
+    border-color: rgba(0, 212, 255, 0.3);
+    transform: scale(1.03);
+}
+
+/* Task list */
+.pd-task-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-radius: 0.75rem;
+    background: rgba(0, 0, 0, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    transition: all 0.2s;
+    cursor: pointer;
+}
+
+.pd-task-item:hover {
+    background: rgba(0, 212, 255, 0.04);
+    border-color: rgba(0, 212, 255, 0.12);
+}
+
+.pd-task-check {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    border: 2px solid #334155;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s;
+    flex-shrink: 0;
+}
+
+.pd-task-check.done {
+    background: rgba(0, 255, 136, 0.15);
+    border-color: #00ff88;
+    color: #00ff88;
+}
+
+/* FIR form */
+.pd-input {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(0, 212, 255, 0.12);
+    border-radius: 0.65rem;
+    padding: 0.65rem 0.85rem;
+    color: #e2e8f0;
+    font-family: 'Outfit', sans-serif;
+    font-size: 0.82rem;
+    transition: border-color 0.3s;
+    outline: none;
+}
+
+.pd-input:focus {
+    border-color: rgba(0, 212, 255, 0.4);
+    box-shadow: 0 0 12px rgba(0, 212, 255, 0.08);
+}
+
+.pd-input::placeholder {
+    color: #334155;
+}
+
+/* Responsive */
+@media (max-width: 1024px) {
+    .pd-sidebar {
+        transform: translateX(-100%);
+    }
+
+    .pd-sidebar.open {
+        transform: translateX(0);
+    }
+
+    .pd-main {
+        margin-left: 0;
+    }
+
+    .pd-case-detail {
+        width: 100%;
+    }
+}

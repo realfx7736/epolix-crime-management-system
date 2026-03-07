@@ -1,0 +1,6 @@
+{
+    "terminal.integrated.tabs.enabled": true,
+    "terminal.integrated.defaultProfile.windows": "PowerShell",
+    "workbench.panel.defaultLocation": "bottom",
+    "task.allowAutomaticTasks": "on"
+}
