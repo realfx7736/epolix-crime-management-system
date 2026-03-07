@@ -108,18 +108,26 @@ export default function Home() {
         e.preventDefault();
         setIsSending(true);
         try {
-            const res = await fetch('https://epolix-api.onrender.com/api/support/send', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(contactForm)
-            });
-            if (res.ok) {
+            // Save Support Message to Supabase
+            const { error } = await supabase.from('support_messages').insert([{
+                name: contactForm.name,
+                email: contactForm.email,
+                subject: contactForm.subject,
+                message: contactForm.message,
+                status: 'Unread'
+            }]);
+
+            if (!error) {
                 setSentStatus('Tactical Transmission Received. Support Team has been alerted.');
                 setContactForm({ name: '', email: '', subject: '', message: '' });
                 setTimeout(() => setSentStatus(null), 5000);
+            } else {
+                throw error;
             }
         } catch (err) {
-            console.error("Transmission Interrupted");
+            console.error("Transmission Interrupted", err);
+            setSentStatus('Transmission Failed. Please try again.');
+            setTimeout(() => setSentStatus(null), 5000);
         } finally {
             setIsSending(false);
         }
