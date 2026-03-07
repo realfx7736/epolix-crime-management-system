@@ -1,4 +1,4 @@
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const { supabase } = require('../config/supabase');
 const ApiError = require('../utils/ApiError');
 const { paginate, paginatedResponse } = require('../utils/helpers');

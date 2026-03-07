@@ -19,7 +19,7 @@
   "license": "ISC",
   "dependencies": {
     "@supabase/supabase-js": "^2.98.0",
-    "bcrypt": "^5.1.1",
+    "bcryptjs": "^3.0.3",
     "cors": "^2.8.6",
     "dotenv": "^16.6.1",
     "express": "^4.22.1",
