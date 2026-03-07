@@ -67,7 +67,7 @@ export default function Home() {
         e.preventDefault();
         setIsSending(true);
         try {
-            const res = await fetch('http://localhost:5000/api/support/send', {
+            const res = await fetch('https://epolix-api.onrender.com/api/support/send', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(contactForm)

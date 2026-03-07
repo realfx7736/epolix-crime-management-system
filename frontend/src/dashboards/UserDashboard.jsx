@@ -109,7 +109,7 @@ const UserDashboard = () => {
             if (data && !error) { setFoundCase(data); }
             else {
                 // Fallback to old backend if supabase fetch fails
-                const res = await fetch(`http://localhost:5000/api/case/track/${trackingId}`);
+                const res = await fetch(`https://epolix-api.onrender.com/api/case/track/${trackingId}`);
                 if (res.ok) {
                     const dataFallback = await res.json();
                     if (dataFallback) setFoundCase(dataFallback);

@@ -81,8 +81,8 @@ const AdminDashboard = () => {
     const [stats, setStats] = useState({ total: 507, resolved: 312, active: 142, pending: 53, officers: 28, stations: 4 });
 
     useEffect(() => {
-        fetch('http://localhost:5000/api/case/all').then(r => r.json()).then(d => { if (Array.isArray(d)) setRealCases(d); }).catch(() => { });
-        fetch('http://localhost:5000/api/support/all').then(r => r.json()).then(d => { if (Array.isArray(d)) setRealMessages(d); }).catch(() => { });
+        fetch('https://epolix-api.onrender.com/api/case/all').then(r => r.json()).then(d => { if (Array.isArray(d)) setRealCases(d); }).catch(() => { });
+        fetch('https://epolix-api.onrender.com/api/support/all').then(r => r.json()).then(d => { if (Array.isArray(d)) setRealMessages(d); }).catch(() => { });
     }, []);
 
     useEffect(() => {
@@ -254,7 +254,7 @@ const AdminDashboard = () => {
     R.complaints = () => (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
             <div className="flex items-center justify-between"><h2 className="text-lg font-bold flex items-center gap-2" style={{ color: '#ff3366' }}><AlertCircle size={20} /> All Complaints</h2>
-                <button onClick={() => fetch('http://localhost:5000/api/case/all').then(r => r.json()).then(d => { if (Array.isArray(d)) setRealCases(d) })} className="ad-btn secondary text-xs flex items-center gap-1"><RefreshCw size={13} /> Refresh</button></div>
+                <button onClick={() => fetch('https://epolix-api.onrender.com/api/case/all').then(r => r.json()).then(d => { if (Array.isArray(d)) setRealCases(d) })} className="ad-btn secondary text-xs flex items-center gap-1"><RefreshCw size={13} /> Refresh</button></div>
             <div className="glass-card overflow-hidden">
                 <table className="ad-table">
                     <thead><tr>{["Case ID", "Description", "Category", "Status", "Reported By", "Date"].map(h => <th key={h}>{h}</th>)}</tr></thead>
