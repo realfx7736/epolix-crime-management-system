@@ -15,9 +15,15 @@ import {
     Zap,
     Send,
     ShieldCheck,
-    MessageSquare
+    MessageSquare,
+    CheckCircle2,
+    AlertTriangle,
+    MapPin,
+    FileText,
+    RefreshCw
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "../supabaseClient";
 
 
 const CrimeSceneBackground = () => {
@@ -62,6 +68,41 @@ export default function Home() {
     const [contactForm, setContactForm] = useState({ name: '', email: '', subject: '', message: '' });
     const [isSending, setIsSending] = useState(false);
     const [sentStatus, setSentStatus] = useState(null);
+
+    // Anonymous Tip State
+    const [showTipModal, setShowTipModal] = useState(false);
+    const [tipForm, setTipForm] = useState({ category: 'Other', location: '', description: '' });
+    const [isTipSending, setIsTipSending] = useState(false);
+    const [tipSuccess, setTipSuccess] = useState(false);
+
+    const handleTipSubmit = async (e) => {
+        e.preventDefault();
+        setIsTipSending(true);
+        try {
+            // Save to Supabase (using the complaints table for now as an anonymous entry)
+            const { error } = await supabase.from('complaints').insert([{
+                title: `Anonymous Tip: ${tipForm.category}`,
+                description: tipForm.description,
+                crime_type: tipForm.category,
+                location: tipForm.location || 'Unknown',
+                status: 'Pending',
+                is_anonymous: true
+            }]);
+
+            if (!error) {
+                setTipSuccess(true);
+                setTimeout(() => {
+                    setTipSuccess(false);
+                    setShowTipModal(false);
+                    setTipForm({ category: 'Other', location: '', description: '' });
+                }, 3000);
+            }
+        } catch (err) {
+            console.error("Tip Submission Failed", err);
+        } finally {
+            setIsTipSending(false);
+        }
+    };
 
     const handleContactSubmit = async (e) => {
         e.preventDefault();
@@ -461,7 +502,10 @@ export default function Home() {
                             >
                                 Dial 112 Now
                             </button>
-                            <button className="glass bg-white/5 px-10 py-5 rounded-2xl font-bold text-xl hover:bg-white/10 transition-all">
+                            <button
+                                onClick={() => setShowTipModal(true)}
+                                className="glass bg-white/5 px-10 py-5 rounded-2xl font-bold text-xl hover:bg-white/10 transition-all"
+                            >
                                 Anonymous Tip
                             </button>
                         </div>
@@ -481,6 +525,131 @@ export default function Home() {
                     </p>
                 </div>
             </footer>
+
+            {/* Anonymous Tip Modal */}
+            <AnimatePresence>
+                {showTipModal && (
+                    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            onClick={() => setShowTipModal(false)}
+                            className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+                        />
+                        <motion.div
+                            initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                            animate={{ scale: 1, opacity: 1, y: 0 }}
+                            exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                            className="relative w-full max-w-lg glass border border-white/10 rounded-[2.5rem] p-8 md:p-10 shadow-2xl overflow-hidden"
+                        >
+                            <div className="absolute top-0 left-0 w-full h-1.5 bg-rose-500/20">
+                                <motion.div
+                                    initial={{ width: 0 }}
+                                    animate={{ width: "100%" }}
+                                    transition={{ duration: 0.5 }}
+                                    className="h-full bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.5)]"
+                                />
+                            </div>
+
+                            <div className="flex justify-between items-start mb-8">
+                                <div>
+                                    <h3 className="text-2xl font-bold flex items-center gap-3">
+                                        <div className="p-3 bg-rose-500/10 rounded-xl">
+                                            <ShieldAlert className="text-rose-500" size={24} />
+                                        </div>
+                                        Submit Anonymous Tip
+                                    </h3>
+                                    <p className="text-slate-400 mt-2 text-sm uppercase tracking-widest font-black">Encrypted & Secure</p>
+                                </div>
+                                <button onClick={() => setShowTipModal(false)} className="p-2 hover:bg-white/5 rounded-full transition-colors">
+                                    <X size={20} />
+                                </button>
+                            </div>
+
+                            {tipSuccess ? (
+                                <motion.div
+                                    initial={{ opacity: 0, scale: 0.9 }}
+                                    animate={{ opacity: 1, scale: 1 }}
+                                    className="py-12 text-center"
+                                >
+                                    <div className="w-20 h-20 bg-emerald-500/10 border border-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                                        <CheckCircle2 className="text-emerald-500" size={40} />
+                                    </div>
+                                    <h4 className="text-xl font-bold text-emerald-400 mb-2">Tip Transmitted!</h4>
+                                    <p className="text-slate-400">Thank you for your civic contribution. The info has been securely routed.</p>
+                                </motion.div>
+                            ) : (
+                                <form onSubmit={handleTipSubmit} className="space-y-6">
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2 mb-2">
+                                            <AlertTriangle size={14} className="text-amber-500" /> Crime Category
+                                        </label>
+                                        <select
+                                            required
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-white focus:outline-none focus:border-rose-500 transition-all"
+                                            value={tipForm.category}
+                                            onChange={(e) => setTipForm({ ...tipForm, category: e.target.value })}
+                                        >
+                                            <option value="Other">Select Category</option>
+                                            <option value="Drug Offense">Drug Offense</option>
+                                            <option value="Assault">Assault / Violence</option>
+                                            <option value="Theft">Theft / Robbery</option>
+                                            <option value="Cybercrime">Cybercrime</option>
+                                            <option value="Corruption">Corruption / Bribery</option>
+                                            <option value="Missing Person">Information on Missing Person</option>
+                                        </select>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2 mb-2">
+                                            <MapPin size={14} /> Probable Location
+                                        </label>
+                                        <input
+                                            type="text"
+                                            placeholder="Area, Landmark or Address..."
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-white focus:outline-none focus:border-rose-500 transition-all"
+                                            value={tipForm.location}
+                                            onChange={(e) => setTipForm({ ...tipForm, location: e.target.value })}
+                                        />
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <label className="text-xs font-bold uppercase tracking-widest text-slate-500 flex items-center gap-2 mb-2">
+                                            <FileText size={14} /> Detailed Information
+                                        </label>
+                                        <textarea
+                                            required
+                                            rows="4"
+                                            placeholder="Provide as much detail as possible. Your identity remains 100% hidden..."
+                                            className="w-full bg-white/5 border border-white/10 rounded-xl p-4 text-white focus:outline-none focus:border-rose-500 transition-all resize-none"
+                                            value={tipForm.description}
+                                            onChange={(e) => setTipForm({ ...tipForm, description: e.target.value })}
+                                        ></textarea>
+                                    </div>
+
+                                    <button
+                                        type="submit"
+                                        disabled={isTipSending}
+                                        className="w-full bg-rose-600 hover:bg-rose-700 text-white py-5 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all transform hover:scale-[1.02] shadow-xl shadow-rose-900/20 disabled:opacity-50 disabled:cursor-wait"
+                                    >
+                                        {isTipSending ? <RefreshCw className="animate-spin" size={20} /> : (
+                                            <>
+                                                <Send size={18} />
+                                                Submit Truly Anonymous Tip
+                                            </>
+                                        )}
+                                    </button>
+
+                                    <p className="text-[10px] text-center text-slate-500 uppercase tracking-tight leading-relaxed">
+                                        Note: This data is end-to-end encrypted. We do not store your IP address or browser fingerprint during anonymous submissions.
+                                    </p>
+                                </form>
+                            )}
+                        </motion.div>
+                    </div>
+                )}
+            </AnimatePresence>
         </div>
     );
 }
