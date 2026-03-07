@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: epolix-backend
+    env: node
+    region: singapore
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 5000
+      - key: FRONTEND_URL
+        fromSecret: FRONTEND_URL
+      - key: JWT_SECRET
+        fromSecret: JWT_SECRET
+      - key: JWT_REFRESH_SECRET
+        fromSecret: JWT_REFRESH_SECRET
+      - key: JWT_EXPIRY
+        value: 8h
+      - key: JWT_REFRESH_EXPIRY
+        value: 7d
+      - key: SUPABASE_URL
+        fromSecret: SUPABASE_URL
+      - key: SUPABASE_ANON_KEY
+        fromSecret: SUPABASE_ANON_KEY
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        fromSecret: SUPABASE_SERVICE_ROLE_KEY
+      - key: RATE_LIMIT_WINDOW_MS
+        value: 900000
+      - key: RATE_LIMIT_MAX_REQUESTS
+        value: 100
+      - key: MAX_FILE_SIZE
+        value: 10485760
+      - key: UPLOAD_DIR
+        value: ./uploads
