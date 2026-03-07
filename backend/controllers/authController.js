@@ -1,72 +1,111 @@
 const authService = require('../services/authService');
 
-const register = async (req, res, next) => {
+// ─── Helper ────────────────────────────────────────────────────────────────
+const getIp = (req) =>
+    req.headers['x-forwarded-for']?.split(',')[0]?.trim() ||
+    req.socket?.remoteAddress ||
+    'unknown';
+
+// ─── Citizen: Aadhaar verification → OTP ──────────────────────────────────
+const citizenLogin = async (req, res) => {
     try {
-        const user = await authService.register(req.body);
-        res.status(201).json({ success: true, message: 'Registration successful.', data: user });
-    } catch (err) { next(err); }
+        const { aadhaarNumber } = req.body;
+        if (!aadhaarNumber) {
+            return res.status(400).json({ success: false, error: 'Aadhaar number is required.' });
+        }
+        const result = await authService.citizenLogin(aadhaarNumber, getIp(req));
+        return res.status(200).json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, error: err.message });
+    }
 };
 
-const login = async (req, res, next) => {
+// ─── Terminal Login (Police / Staff / Admin) ───────────────────────────────
+const terminalLogin = async (req, res) => {
     try {
-        const { identifier, password, role } = req.body;
-        const result = await authService.login(identifier, password, role);
-        res.json({ success: true, ...result });
-    } catch (err) { next(err); }
+        const { role, identifier, password } = req.body;
+        if (!role || !identifier || !password) {
+            return res.status(400).json({ success: false, error: 'role, identifier, and password are required.' });
+        }
+        const result = await authService.terminalLogin(role, identifier, password, getIp(req));
+        return res.status(200).json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, error: err.message });
+    }
 };
 
-const verifyOTP = async (req, res, next) => {
+// ─── Verify OTP (All roles) ───────────────────────────────────────────────
+const verifyOTP = async (req, res) => {
     try {
-        const { identifier, otp, role } = req.body;
-        const result = await authService.verifyOTP(identifier, otp, role);
-        res.json({ success: true, ...result });
-    } catch (err) { next(err); }
+        const { userId, role, otp } = req.body;
+        if (!userId || !role || !otp) {
+            return res.status(400).json({ success: false, error: 'userId, role, and otp are required.' });
+        }
+        const result = await authService.verifyOTP(userId, role, otp, getIp(req));
+        return res.status(200).json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, error: err.message });
+    }
 };
 
-const citizenAadhaarStep1 = async (req, res, next) => {
+// ─── Register Police Officer (Admin only) ─────────────────────────────────
+const registerPoliceOfficer = async (req, res) => {
     try {
-        const { aadhaar } = req.body;
-        const result = await authService.citizenAadhaarStep1(aadhaar);
-        res.json({ success: true, ...result });
-    } catch (err) { next(err); }
+        const result = await authService.registerPoliceOfficer(req.body);
+        return res.status(201).json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, error: err.message });
+    }
 };
 
-const citizenVerifyOTP = async (req, res, next) => {
+// ─── Register Staff Member (Admin only) ───────────────────────────────────
+const registerStaff = async (req, res) => {
     try {
-        const { identifier, otp } = req.body;
-        const result = await authService.citizenVerifyOTP(identifier, otp);
-        res.json({ success: true, ...result });
-    } catch (err) { next(err); }
+        const result = await authService.registerStaff(req.body);
+        return res.status(201).json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, error: err.message });
+    }
 };
 
-const refreshToken = async (req, res, next) => {
+// ─── Register Admin (Super Admin only) ────────────────────────────────────
+const registerAdmin = async (req, res) => {
     try {
-        const { refreshToken } = req.body;
-        if (!refreshToken) return res.status(400).json({ success: false, message: 'Refresh token is required.' });
-        const result = await authService.refreshToken(refreshToken);
-        res.json({ success: true, ...result });
-    } catch (err) { next(err); }
+        const result = await authService.registerAdmin(req.body);
+        return res.status(201).json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, error: err.message });
+    }
 };
 
-const getProfile = async (req, res, next) => {
+// ─── Seed Database ────────────────────────────────────────────────────────
+const seedDatabase = async (req, res) => {
     try {
-        const profile = await authService.getProfile(req.user.id);
-        res.json({ success: true, data: profile });
-    } catch (err) { next(err); }
+        const result = await authService.seedDatabase();
+        return res.status(200).json({ success: true, ...result });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
 };
 
-const updateProfile = async (req, res, next) => {
+// ─── Get own profile ──────────────────────────────────────────────────────
+const getProfile = async (req, res) => {
     try {
-        const updated = await authService.updateProfile(req.user.id, req.body);
-        res.json({ success: true, message: 'Profile updated.', data: updated });
-    } catch (err) { next(err); }
+        const user = req.user;
+        if (!user) return res.status(401).json({ success: false, error: 'Not authenticated.' });
+        return res.status(200).json({ success: true, user });
+    } catch (err) {
+        return res.status(500).json({ success: false, error: err.message });
+    }
 };
 
-const seedDatabase = async (req, res, next) => {
-    try {
-        const result = await authService.seedUsers();
-        res.json({ success: true, ...result });
-    } catch (err) { next(err); }
+module.exports = {
+    citizenLogin,
+    terminalLogin,
+    verifyOTP,
+    registerPoliceOfficer,
+    registerStaff,
+    registerAdmin,
+    seedDatabase,
+    getProfile,
 };
-
-module.exports = { register, login, verifyOTP, citizenAadhaarStep1, citizenVerifyOTP, refreshToken, getProfile, updateProfile, seedDatabase };

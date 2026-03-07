@@ -81,6 +81,8 @@ const AdminDashboard = () => {
     const [realMessages, setRealMessages] = useState([]);
     const [stats, setStats] = useState({ total: 507, resolved: 312, active: 142, pending: 53, officers: 28, stations: 4 });
 
+    const [admin, setAdmin] = useState({ fullName: "Super Admin", adminId: "ADM-HQ-001", email: "admin@epolix.gov" });
+
     const fetchSupabaseData = async () => {
         try {
             // Fetch All Complaints (including Anonymous Tips)
@@ -125,6 +127,8 @@ const AdminDashboard = () => {
     };
 
     useEffect(() => {
+        const storedUser = localStorage.getItem('user');
+        if (storedUser) setAdmin(JSON.parse(storedUser));
         fetchSupabaseData();
     }, []);
 
@@ -479,9 +483,9 @@ const AdminDashboard = () => {
                 <div className="p-2.5 border-t border-white/5">
                     <div className="flex items-center gap-2.5 px-2.5 py-2 mb-1.5">
                         <div className="w-7 h-7 rounded-lg bg-red-500/15 flex items-center justify-center text-red-400 border border-red-400/15"><User size={13} /></div>
-                        <div><div className="text-[11px] font-bold text-slate-300">Super Admin</div><div className="text-[8px] text-slate-600">admin@epolix.gov</div></div>
+                        <div><div className="text-[11px] font-bold text-slate-300">{admin.fullName}</div><div className="text-[8px] text-slate-600">{admin.adminId || admin.email}</div></div>
                     </div>
-                    <button onClick={() => navigate("/")} className="ad-nav-btn text-red-400 hover:bg-red-500/10 w-full"><LogOut size={15} /> Sign Out</button>
+                    <button onClick={() => { localStorage.clear(); navigate("/"); }} className="ad-nav-btn text-red-400 hover:bg-red-500/10 w-full"><LogOut size={15} /> Sign Out</button>
                 </div>
             </aside>
 
