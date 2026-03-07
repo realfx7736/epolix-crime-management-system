@@ -2,11 +2,15 @@
     "name": "e-polix-root",
     "version": "1.0.0",
     "description": "Root management for E-POLIX Crime Record Management System",
+    "private": true,
     "scripts": {
         "install:all": "npm install && npm install --prefix frontend && npm install --prefix backend",
-        "dev": "run-p dev:frontend dev:backend",
+        "dev": "npm-run-all --parallel dev:frontend dev:backend",
         "dev:frontend": "npm run dev --prefix frontend",
-        "dev:backend": "node backend/server.js"
+        "dev:backend": "npm run dev --prefix backend",
+        "build:frontend": "npm run build --prefix frontend",
+        "build:all": "npm run build:frontend",
+        "seed": "curl -X POST http://localhost:5000/api/auth/seed"
     },
     "devDependencies": {
         "concurrently": "^8.2.2",

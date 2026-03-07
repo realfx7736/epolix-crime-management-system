@@ -6,10 +6,12 @@ A secure, multi-role crime record management platform for law enforcement agenci
 
 ```
 E-POLIX/
-├── frontend/        # React + Vite (deployed on Vercel)
-├── backend/         # Node.js + Express (deployed on Render)
-├── supabase_sql.sql # Database schema (run in Supabase SQL Editor)
-└── render.yaml      # Render deployment config
+├── frontend/           # React + Vite (deployed on Vercel)
+├── backend/            # Node.js + Express (deployed on Render)
+├── database/           # SQL schemas and DB logic
+│   └── supabase_sql.sql
+├── package.json        # Root management
+└── render.yaml         # Render deployment config
 ```
 
 ## 👥 User Roles & Portals
