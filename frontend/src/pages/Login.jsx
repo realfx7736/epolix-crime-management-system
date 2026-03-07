@@ -10,7 +10,22 @@ export default function Login() {
     const [password, setPassword] = useState("");
     const [otp, setOtp] = useState(["", "", "", "", "", ""]);
     const [loading, setLoading] = useState(false);
+    const [timer, setTimer] = useState(0);
+    const [aadhaarHash, setAadhaarHash] = useState("");
+    const [phoneMask, setPhoneMask] = useState("");
+    const [errorMsg, setErrorMsg] = useState("");
     const navigate = useNavigate();
+
+    // OTP Timer logic
+    React.useEffect(() => {
+        let interval = null;
+        if (timer > 0) {
+            interval = setInterval(() => setTimer(timer - 1), 1000);
+        } else {
+            clearInterval(interval);
+        }
+        return () => clearInterval(interval);
+    }, [timer]);
 
     const roles = [
         { id: "user", label: "Citizen", color: "blue", icon: <User size={20} /> },
@@ -21,27 +36,88 @@ export default function Login() {
 
     const currentRole = roles.find(r => r.id === role);
 
-    const handleNextStep = () => {
+    const handleNextStep = async () => {
+        setErrorMsg("");
         if (step === 1) {
             setStep(2);
         } else if (step === 2) {
-            // In a real app, you'd verify identifier/password here
-            setLoading(true);
-            setTimeout(() => {
-                setStep(3);
-                setLoading(false);
-            }, 1000);
+            if (role === 'user') {
+                // Citizen Aadhaar Logic
+                if (!/^\d{12}$/.test(identifier)) {
+                    setErrorMsg("Invalid Aadhaar: Must be exactly 12 digits.");
+                    return;
+                }
+                setLoading(true);
+                try {
+                    const res = await fetch('https://epolix-api.onrender.com/api/auth/citizen/aadhaar', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ aadhaar: identifier })
+                    });
+                    const data = await res.json();
+                    if (data.success) {
+                        setAadhaarHash(data.identifier);
+                        setPhoneMask(data.message.split(' Aadhaar ')[1]);
+                        setStep(3);
+                        setTimer(60);
+                        // For DEV purposes only
+                        if (data.devOtp) console.log("MOCK OTP RECEIVED:", data.devOtp);
+                    } else {
+                        setErrorMsg(data.message || "Aadhaar verification failed.");
+                    }
+                } catch (err) {
+                    setErrorMsg("System offline. Please try again later.");
+                } finally {
+                    setLoading(false);
+                }
+            } else {
+                // Other Roles Login
+                setLoading(true);
+                setTimeout(() => {
+                    setStep(3);
+                    setLoading(false);
+                }, 1000);
+            }
         }
     };
 
     const handleVerifyOtp = async () => {
+        setErrorMsg("");
         setLoading(true);
         const otpValue = otp.join("");
-        // Simulation of login
-        setTimeout(() => {
-            navigate(`/${role}`);
+
+        try {
+            const endpoint = role === 'user'
+                ? 'https://epolix-api.onrender.com/api/auth/citizen/verify-otp'
+                : 'https://epolix-api.onrender.com/api/auth/verify-otp';
+
+            const payload = role === 'user'
+                ? { identifier: aadhaarHash, otp: otpValue }
+                : { identifier, otp: otpValue, role };
+
+            const res = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+
+            if (data.success) {
+                localStorage.setItem('token', data.accessToken);
+                localStorage.setItem('user', JSON.stringify(data.user));
+                navigate(`/${role}`);
+            } else {
+                setErrorMsg(data.message || "Verification failed.");
+            }
+        } catch (err) {
+            setErrorMsg("Authentication error.");
+        } finally {
             setLoading(false);
-        }, 1500);
+        }
+    };
+
+    const handleResendOtp = () => {
+        if (timer === 0) handleNextStep(); // Reuse step 2 logic
     };
 
     const otpInputHandler = (e, index) => {
@@ -174,39 +250,48 @@ export default function Login() {
                                         {role === 'user' ? <Fingerprint className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={20} /> : <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={20} />}
                                         <input
                                             type="text"
+                                            maxLength={role === 'user' ? 12 : 50}
                                             placeholder={
                                                 role === 'admin' ? "Admin ID / Email" :
                                                     role === 'police' ? "Police ID / Badge No" :
                                                         role === 'staff' ? "Staff ID / Personnel No" :
-                                                            "Aadhaar Card No (12-digit)"
+                                                            "Aadhaar Number (12-digit)"
                                             }
-                                            className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 pl-12 pr-4 text-white focus:outline-none focus:border-blue-500 transition-all text-lg placeholder:text-slate-600"
+                                            className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 pl-12 pr-4 text-white focus:outline-none focus:border-blue-500 transition-all text-lg placeholder:text-slate-600 font-mono"
                                             value={identifier}
                                             onChange={(e) => setIdentifier(e.target.value)}
                                         />
                                     </div>
 
-                                    <div className="relative group">
-                                        <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={20} />
-                                        <input
-                                            type="password"
-                                            placeholder={role === 'user' ? "Guardian Phone Number" : "Secure Password"}
-                                            className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 pl-12 pr-4 text-white focus:outline-none focus:border-blue-500 transition-all text-lg placeholder:text-slate-600"
-                                            value={password}
-                                            onChange={(e) => setPassword(e.target.value)}
-                                        />
-                                    </div>
+                                    {role !== 'user' && (
+                                        <div className="relative group">
+                                            <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" size={20} />
+                                            <input
+                                                type="password"
+                                                placeholder="Secure Password"
+                                                className="w-full bg-white/5 border border-white/10 rounded-2xl py-5 pl-12 pr-4 text-white focus:outline-none focus:border-blue-500 transition-all text-lg placeholder:text-slate-600"
+                                                value={password}
+                                                onChange={(e) => setPassword(e.target.value)}
+                                            />
+                                        </div>
+                                    )}
+
+                                    {errorMsg && (
+                                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-bold flex items-center gap-2">
+                                            <Activity size={14} /> {errorMsg}
+                                        </motion.div>
+                                    )}
                                 </div>
 
                                 <div className="flex gap-4">
-                                    <button onClick={() => setStep(1)} className="flex-1 py-5 rounded-2xl font-bold bg-white/5 text-slate-400 hover:bg-white/10 transition-all">Back</button>
+                                    <button onClick={() => setStep(1)} className="flex-1 py-5 rounded-2xl font-bold bg-white/5 text-slate-400 hover:bg-white/10 transition-all uppercase text-[10px] tracking-widest">Back</button>
                                     <button
                                         onClick={handleNextStep}
                                         disabled={loading}
-                                        className={`flex-[2] py-5 rounded-2xl font-bold text-white shadow-lg transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 ${role === 'admin' ? 'bg-rose-600' : role === 'police' ? 'bg-indigo-600' : 'bg-blue-600'
+                                        className={`flex-[2] py-5 rounded-2xl font-bold text-white shadow-lg transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 ${role === 'admin' ? 'bg-rose-600 shadow-rose-900/40' : role === 'police' ? 'bg-indigo-600 shadow-indigo-900/40' : 'bg-blue-600 shadow-blue-900/40'
                                             }`}
                                     >
-                                        {loading ? <Activity className="animate-spin" size={20} /> : "Authenticate Identity"}
+                                        {loading ? <Activity className="animate-spin" size={20} /> : (role === 'user' ? "Send OTP" : "Authenticate Identity")}
                                     </button>
                                 </div>
                             </motion.div>
@@ -224,8 +309,8 @@ export default function Login() {
                                 </div>
 
                                 <div>
-                                    <h3 className="text-2xl font-bold mb-2">Multifactor Challenge</h3>
-                                    <p className="text-slate-400">Enter code sent to registered device for {identifier}</p>
+                                    <h3 className="text-2xl font-bold mb-2 uppercase tracking-tight">OTP Verification</h3>
+                                    <p className="text-slate-400 text-sm">Enter code sent to phone linked with Aadhaar {phoneMask}</p>
                                 </div>
 
                                 <div className="flex justify-center gap-3">
@@ -242,14 +327,30 @@ export default function Login() {
                                     ))}
                                 </div>
 
-                                <button
-                                    onClick={handleVerifyOtp}
-                                    disabled={loading}
-                                    className={`w-full py-5 rounded-2xl font-bold text-white shadow-lg transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 ${role === 'admin' ? 'bg-rose-600' : role === 'police' ? 'bg-indigo-600' : 'bg-blue-600'
-                                        }`}
-                                >
-                                    {loading ? <Activity className="animate-spin" size={20} /> : "Confirm & Enter System"}
-                                </button>
+                                <div className="space-y-4">
+                                    <button
+                                        onClick={handleVerifyOtp}
+                                        disabled={loading || otp.join("").length < 6}
+                                        className={`w-full py-5 rounded-2xl font-bold text-white shadow-lg transition-all transform hover:scale-[1.02] flex items-center justify-center gap-2 disabled:opacity-50 ${role === 'admin' ? 'bg-rose-600 shadow-rose-900/40' : role === 'police' ? 'bg-indigo-600 shadow-indigo-900/40' : 'bg-blue-600 shadow-blue-900/40'
+                                            }`}
+                                    >
+                                        {loading ? <Activity className="animate-spin" size={20} /> : "Verify & Login"}
+                                    </button>
+
+                                    <div className="text-xs">
+                                        {timer > 0 ? (
+                                            <span className="text-slate-500">Resend OTP in <span className="text-white font-bold font-mono">{timer}s</span></span>
+                                        ) : (
+                                            <button onClick={handleResendOtp} className="text-blue-500 font-bold hover:underline">Resend Verification Code</button>
+                                        )}
+                                    </div>
+
+                                    {errorMsg && (
+                                        <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-500 text-xs font-bold">
+                                            {errorMsg}
+                                        </div>
+                                    )}
+                                </div>
                             </motion.div>
                         )}
                     </AnimatePresence>

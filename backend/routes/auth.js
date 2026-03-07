@@ -16,6 +16,11 @@ const authLimiter = rateLimit({
 router.post('/register', authLimiter, validate(registerSchema), authController.register);
 router.post('/login', authLimiter, validate(loginSchema), authController.login);
 router.post('/verify-otp', authLimiter, validate(otpVerifySchema), authController.verifyOTP);
+
+// Citizen Specific Aadhaar Auth
+router.post('/citizen/aadhaar', authLimiter, authController.citizenAadhaarStep1);
+router.post('/citizen/verify-otp', authLimiter, authController.citizenVerifyOTP);
+
 router.post('/refresh-token', authController.refreshToken);
 
 // ---- Protected Routes ----

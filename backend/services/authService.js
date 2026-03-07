@@ -5,10 +5,120 @@ const ApiError = require('../utils/ApiError');
 const { generateOTP } = require('../utils/helpers');
 const logger = require('../utils/logger');
 
+const crypto = require('crypto');
+
 const SALT_ROUNDS = 12;
 const MASTER_OTP = process.env.MASTER_OTP || '123456';
+const AADHAAR_SALT = process.env.AADHAAR_SALT || 'E-POLIX-SECURE-SALT-2026';
 
 class AuthService {
+
+    // Securely hash Aadhaar for database lookups
+    _hashAadhaar(aadhaar) {
+        return crypto.createHmac('sha256', AADHAAR_SALT).update(aadhaar).digest('hex');
+    }
+
+    // Citizen Login Step 1: Aadhaar Check & Send OTP
+    async citizenAadhaarStep1(aadhaar) {
+        if (!/^\d{12}$/.test(aadhaar)) {
+            throw ApiError.badRequest('Invalid Aadhaar format. Must be 12 digits.');
+        }
+
+        const hash = this._hashAadhaar(aadhaar);
+        const masked = `XXXXXXXX${aadhaar.slice(-4)}`;
+
+        // Check if citizen exists
+        let { data: citizen } = await supabase
+            .from('users')
+            .select('*')
+            .eq('aadhaar_hash', hash)
+            .eq('role', 'citizen')
+            .single();
+
+        // If not, auto-create a basic citizen record (since it's a mock eKYC)
+        if (!citizen) {
+            const { data: newUser, error } = await supabase
+                .from('users')
+                .insert({
+                    full_name: 'Citizen (Aadhaar Verified)',
+                    role: 'citizen',
+                    aadhaar_hash: hash,
+                    aadhaar: masked,
+                    phone: '9876543210', // Mock phone linked to Aadhaar
+                    is_active: true,
+                    is_verified: false
+                })
+                .select('*')
+                .single();
+
+            if (error) throw ApiError.internal('Failed to initialize citizen record.');
+            citizen = newUser;
+        }
+
+        // Generate OTP
+        const otp = generateOTP();
+        const expiresAt = new Date(Date.now() + 60 * 1000); // 60 seconds as requested
+
+        // Store OTP
+        await supabase.from('otp_tokens').insert({
+            user_id: citizen.id,
+            identifier: hash, // Use hash as ID to avoid exposing Aadhaar
+            otp_code: otp,
+            purpose: 'citizen_login',
+            expires_at: expiresAt.toISOString()
+        });
+
+        logger.info(`Citizen OTP sent for Aadhaar: ${masked}`);
+
+        return {
+            success: true,
+            message: `OTP sent to phone linked with Aadhaar ${masked}`,
+            identifier: hash,
+            expiresIn: 60,
+            // Dev mode return
+            ...(process.env.NODE_ENV === 'development' && { devOtp: otp })
+        };
+    }
+
+    // Citizen Login Step 2: Verify OTP
+    async citizenVerifyOTP(identifier_hash, otp) {
+        const { data: otpRecord } = await supabase
+            .from('otp_tokens')
+            .select('*')
+            .eq('identifier', identifier_hash)
+            .eq('otp_code', otp)
+            .eq('is_used', false)
+            .gte('expires_at', new Date().toISOString())
+            .single();
+
+        if (!otpRecord && !(otp === MASTER_OTP && process.env.NODE_ENV === 'development')) {
+            throw ApiError.unauthorized('Invalid or expired OTP.');
+        }
+
+        // Find user
+        const { data: user } = await supabase
+            .from('users')
+            .select('*')
+            .eq('id', otpRecord?.user_id || (await supabase.from('users').select('id').eq('aadhaar_hash', identifier_hash).single()).data.id)
+            .single();
+
+        if (!user) throw ApiError.notFound('Citizen record not found.');
+
+        // Update OTP as used
+        if (otpRecord) {
+            await supabase.from('otp_tokens').update({ is_used: true }).eq('id', otpRecord.id);
+        }
+
+        // Update last login
+        await supabase.from('users').update({
+            last_login: new Date().toISOString(),
+            is_verified: true,
+            is_aadhaar_verified: true
+        }).eq('id', user.id);
+
+        return this._generateTokenResponse(user);
+    }
+
 
     // Register a new user
     async register(userData) {

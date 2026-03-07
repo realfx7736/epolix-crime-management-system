@@ -23,6 +23,22 @@ const verifyOTP = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
+const citizenAadhaarStep1 = async (req, res, next) => {
+    try {
+        const { aadhaar } = req.body;
+        const result = await authService.citizenAadhaarStep1(aadhaar);
+        res.json({ success: true, ...result });
+    } catch (err) { next(err); }
+};
+
+const citizenVerifyOTP = async (req, res, next) => {
+    try {
+        const { identifier, otp } = req.body;
+        const result = await authService.citizenVerifyOTP(identifier, otp);
+        res.json({ success: true, ...result });
+    } catch (err) { next(err); }
+};
+
 const refreshToken = async (req, res, next) => {
     try {
         const { refreshToken } = req.body;
@@ -53,4 +69,4 @@ const seedDatabase = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-module.exports = { register, login, verifyOTP, refreshToken, getProfile, updateProfile, seedDatabase };
+module.exports = { register, login, verifyOTP, citizenAadhaarStep1, citizenVerifyOTP, refreshToken, getProfile, updateProfile, seedDatabase };

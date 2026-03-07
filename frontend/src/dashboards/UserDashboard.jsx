@@ -84,7 +84,21 @@ const UserDashboard = () => {
     const [reportSubmitted, setReportSubmitted] = useState(false);
 
     // Profile
-    const [profile, setProfile] = useState({ name: "Arjun Mehta", email: "arjun.mehta@email.com", phone: "+91 98765 43210", address: "Sector 14, Saket, New Delhi", aadhar: "XXXX-XXXX-4521" });
+    const [profile, setProfile] = useState({ name: "Citizen", email: "", phone: "", address: "", aadhar: "" });
+
+    useEffect(() => {
+        const storedUser = localStorage.getItem('user');
+        if (storedUser) {
+            const u = JSON.parse(storedUser);
+            setProfile({
+                name: u.fullName || "Citizen",
+                email: u.email || "N/A",
+                phone: u.phone || "N/A",
+                address: u.address || "N/A",
+                aadhar: u.aadhaar || "XXXX-XXXX-XXXX"
+            });
+        }
+    }, []);
 
     // Live stats animation
     const [liveCount, setLiveCount] = useState({ active: 127, resolved: 843, officers: 56 });
@@ -523,7 +537,7 @@ const UserDashboard = () => {
                 </nav>
 
                 <div className="p-3 border-t border-white/5">
-                    <button onClick={() => navigate("/")} className="cd-nav-item w-full text-red-400 hover:bg-red-500/10 hover:text-red-400">
+                    <button onClick={() => { localStorage.clear(); navigate("/"); }} className="cd-nav-item w-full text-red-400 hover:bg-red-500/10 hover:text-red-400">
                         <LogOut size={18} /> Sign Out
                     </button>
                 </div>
