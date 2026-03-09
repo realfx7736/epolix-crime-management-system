@@ -4,8 +4,8 @@ services:
     env: node
     region: singapore
     plan: free
-    buildCommand: npm install
-    startCommand: node server.js
+    buildCommand: npm install --prefix backend
+    startCommand: node backend/server.js
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
