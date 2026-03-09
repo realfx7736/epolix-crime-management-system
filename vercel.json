@@ -1,18 +1,16 @@
 {
     "version": 2,
-    "builds": [
-        {
-            "src": "frontend/package.json",
-            "use": "@vercel/static-build",
-            "config": {
-                "distDir": "dist"
-            }
-        }
-    ],
+    "buildCommand": "npm run build --prefix frontend",
+    "outputDirectory": "frontend/dist",
+    "framework": "vite",
     "rewrites": [
         {
+            "source": "/api/(.*)",
+            "destination": "https://epolix-backend.onrender.com/api/$1"
+        },
+        {
             "source": "/(.*)",
-            "destination": "/frontend/$1"
+            "destination": "/index.html"
         }
     ]
 }
