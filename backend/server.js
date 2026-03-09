@@ -47,6 +47,7 @@ const allowedOrigins = [
     'http://localhost:5173',
     'http://localhost:4173',
     'https://epolix.vercel.app',
+    'https://epolix-crime-management-system.vercel.app',
 ];
 app.use(cors({
     origin: (origin, callback) => {

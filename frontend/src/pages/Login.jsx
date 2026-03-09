@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
-const API = 'https://epolix-api.onrender.com';
+const API = import.meta.env.VITE_API_URL?.replace(/\/api$/, '') || 'https://epolix-backend.onrender.com';
 
 // ─── ID Format Validators (mirror of backend) ────────────────────────────────
 const validators = {
