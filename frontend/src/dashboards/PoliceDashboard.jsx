@@ -10,6 +10,7 @@ import {
     Video, FileIcon, MessageSquare, Navigation, Target, Zap, Layers
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { api } from "../utils/api";
 import "./PoliceDashboard.css";
 
 // ─── MOCK DATA ──────────────────────────────────────────
@@ -70,23 +71,81 @@ const PoliceDashboard = () => {
     // Officer Info
     const [officer, setOfficer] = useState({ fullName: "SI Vikram Rathore", policeId: "OFF-110", station: "Saket Division", rank: "SI" });
 
+    const [dbCases, setDbCases] = useState([]);
+    const [dbNotifications, setDbNotifications] = useState([]);
+
+    const fetchOfficerData = async () => {
+        try {
+            // Fetch Overview Stats
+            const overview = await api.get('/dashboard/overview');
+            if (overview.success) {
+                const o = overview.data.overview || {};
+                setLiveStats({
+                    pending: o.pendingComplaints || 0,
+                    investigating: o.activeCases || 0,
+                    onsite: Math.floor(Math.random() * 5), // Mock for now if no real field for this
+                    closed: o.resolvedCases || 0
+                });
+            }
+
+            // Fetch My Cases (Officers only)
+            const casesRes = await api.get('/cases/my');
+            if (casesRes.success) {
+                setDbCases(mapCases(casesRes.data.data));
+            }
+
+            // Fetch Notifications
+            const notifsRes = await api.get('/notifications');
+            if (notifsRes.success) setDbNotifications(notifsRes.data);
+
+        } catch (err) {
+            console.error("Police Dashboard Refresh Error", err);
+        }
+    };
+
+    const mapCases = (list) => {
+        return (list || []).map(c => ({
+            id: c.case_number || c.id,
+            realId: c.id,
+            title: c.title,
+            type: c.category_name || 'General',
+            location: c.location || 'Unknown',
+            priority: c.priority === 'critical' ? 'Critical' : c.priority === 'high' ? 'High' : c.priority === 'medium' ? 'Medium' : 'Low',
+            status: mapStatus(c.status),
+            date: new Date(c.created_at).toLocaleDateString(),
+            reportedBy: c.complainant?.complainant_name || 'Citizen',
+            description: c.description || '',
+            suspect: 'Under Investigation',
+            victim: c.complainant?.complainant_name || 'Unknown',
+            evidence: [],
+            fir: c.complaint?.fir_number || 'Pending'
+        }));
+    };
+
+    const mapStatus = (s) => {
+        const map = {
+            'open': 'Registered',
+            'assigned': 'Registered',
+            'under_investigation': 'Investigating',
+            'evidence_collection': 'Investigating',
+            'onsite': 'On-Site',
+            'closed': 'Closed'
+        };
+        return map[s] || 'Registered';
+    };
+
     useEffect(() => {
         const storedUser = localStorage.getItem('user');
         if (storedUser) setOfficer(JSON.parse(storedUser));
+        fetchOfficerData();
 
-        const iv = setInterval(() => {
-            setLiveStats(p => ({
-                pending: p.pending + (Math.random() > 0.7 ? 1 : 0),
-                investigating: p.investigating + (Math.random() > 0.8 ? 1 : 0),
-                onsite: p.onsite + (Math.random() > 0.9 ? 1 : -0),
-                closed: p.closed + (Math.random() > 0.6 ? 1 : 0),
-            }));
-        }, 6000);
+        const iv = setInterval(fetchOfficerData, 30000); // Polling every 30s
         return () => clearInterval(iv);
     }, []);
 
-    const unreadCount = notifications.filter(n => n.unread).length;
-    const filteredCases = cases.filter(c => {
+    const unreadCount = dbNotifications.filter(n => !n.is_read).length;
+    const activeCases = dbCases.length > 0 ? dbCases : mockCases;
+    const filteredCases = activeCases.filter(c => {
         if (caseFilter !== "all" && c.status.toLowerCase().replace("-", "") !== caseFilter.replace("-", "")) return false;
         if (searchQuery && !c.title.toLowerCase().includes(searchQuery.toLowerCase()) && !c.id.toLowerCase().includes(searchQuery.toLowerCase())) return false;
         return true;
@@ -662,7 +721,20 @@ const PoliceDashboard = () => {
                                 <div>
                                     <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">Update Status</div>
                                     <select className="pd-input w-full" value={selectedCase.status}
-                                        onChange={e => { setCases(prev => prev.map(x => x.id === selectedCase.id ? { ...x, status: e.target.value } : x)); setSelectedCase({ ...selectedCase, status: e.target.value }); }}>
+                                        onChange={async (e) => {
+                                            const newStatus = e.target.value;
+                                            const backendStatusMap = {
+                                                'Registered': 'assigned',
+                                                'Investigating': 'under_investigation',
+                                                'On-Site': 'under_investigation', // Map to best fit
+                                                'Closed': 'closed'
+                                            };
+                                            try {
+                                                await api.put(`/cases/${selectedCase.realId || selectedCase.id}`, { status: backendStatusMap[newStatus] });
+                                                fetchOfficerData();
+                                                setSelectedCase({ ...selectedCase, status: newStatus });
+                                            } catch (err) { alert(err.message); }
+                                        }}>
                                         {["Registered", "Investigating", "On-Site", "Closed"].map(s => <option key={s} value={s}>{s}</option>)}
                                     </select>
                                 </div>

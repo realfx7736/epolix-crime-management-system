@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
+import { api } from "../utils/api";
 import "./AdminDashboard.css";
 
 const mockUsers = [
@@ -83,45 +84,50 @@ const AdminDashboard = () => {
 
     const [admin, setAdmin] = useState({ fullName: "Super Admin", adminId: "ADM-HQ-001", email: "admin@epolix.gov" });
 
-    const fetchSupabaseData = async () => {
-        try {
-            // Fetch All Complaints (including Anonymous Tips)
-            const { data: complaints, error: compError } = await supabase
-                .from('complaints')
-                .select('*')
-                .order('created_at', { ascending: false });
-            if (!compError) setRealCases(complaintMapping(complaints));
+    const [backendStats, setBackendStats] = useState(null);
+    const [dbUsers, setDbUsers] = useState([]);
+    const [dbOfficers, setDbOfficers] = useState([]);
 
-            // Fetch All Support Messages
-            const { data: messages, error: msgError } = await supabase
+    const fetchBackendData = async () => {
+        try {
+            // Fetch Dashboard Overview
+            const overview = await api.get('/dashboard/overview');
+            if (overview.success) setBackendStats(overview.data);
+
+            // Fetch Recent Activity
+            const recent = await api.get('/dashboard/recent');
+            if (recent.success) {
+                setRealCases(complaintMapping(recent.data.recentComplaints));
+            }
+
+            // Fetch Support Messages (can still use supabase or backend if route exists)
+            const { data: messages } = await supabase
                 .from('support_messages')
                 .select('*')
                 .order('created_at', { ascending: false });
-            if (!msgError) setRealMessages(messages);
+            if (messages) setRealMessages(messages);
 
-            // Generate simple stats
-            if (complaints) {
-                setStats(p => ({
-                    ...p,
-                    total: complaints.length + 500, // Combined with historical mock
-                    pending: complaints.filter(c => c.status === 'Pending').length + 50,
-                    resolved: complaints.filter(c => c.status === 'Resolved' || c.status === 'Closed').length + 300
-                }));
-            }
+            // Fetch Real Users & Officers
+            const usersRes = await api.get('/admin/users');
+            if (usersRes.success) setDbUsers(usersRes.data);
+
+            const officersRes = await api.get('/admin/officers');
+            if (officersRes.success) setDbOfficers(officersRes.data);
+
         } catch (err) {
-            console.error("Supabase Refresh Error", err);
+            console.error("Backend Refresh Error", err);
         }
     };
 
     // Helper to map DB row to Dashboard object
     const complaintMapping = (list) => {
         return (list || []).map(c => ({
-            caseId: c.id ? `EPX-${c.id.toString().slice(-6).toUpperCase()}` : 'N/A',
-            complaint: c.description || 'N/A',
+            caseId: c.complaint_number || (c.id ? `EPX-${c.id.toString().slice(-6).toUpperCase()}` : 'N/A'),
+            complaint: c.title || c.description || 'N/A',
             description: c.description || 'N/A',
-            category: c.crime_type || 'General',
+            category: c.category_name || c.crime_type || 'General',
             status: c.status || 'Pending',
-            reportedBy: c.is_anonymous ? 'Anonymous' : (c.reporter_name || 'Citizen'),
+            reportedBy: c.complainant_name || (c.is_anonymous ? 'Anonymous' : 'Citizen'),
             timestamp: c.created_at
         }));
     };
@@ -129,7 +135,7 @@ const AdminDashboard = () => {
     useEffect(() => {
         const storedUser = localStorage.getItem('user');
         if (storedUser) setAdmin(JSON.parse(storedUser));
-        fetchSupabaseData();
+        fetchBackendData();
     }, []);
 
     useEffect(() => {
@@ -137,10 +143,54 @@ const AdminDashboard = () => {
         return () => clearInterval(iv);
     }, []);
 
+    const handleDeleteUser = async (id) => {
+        if (!window.confirm("Are you sure you want to PERMANENTLY delete this user? This cannot be undone.")) return;
+        try {
+            const res = await api.delete(`/admin/users/${id}`);
+            if (res.success) {
+                alert(res.message);
+                fetchBackendData();
+            }
+        } catch (err) {
+            alert(err.message);
+        }
+    };
+
+    const handleToggleUserStatus = async (user) => {
+        try {
+            const action = user.is_active ? 'deactivate' : 'activate';
+            const res = await api.patch(`/admin/users/${user.id}/${action}`);
+            if (res.success) {
+                fetchBackendData();
+            }
+        } catch (err) {
+            alert(err.message);
+        }
+    };
+
+    const handleCreateUser = async (e) => {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const userData = Object.fromEntries(formData.entries());
+        try {
+            const res = await api.post('/admin/users', userData);
+            if (res.success) {
+                setShowModal(null);
+                fetchBackendData();
+            }
+        } catch (err) {
+            alert(err.message);
+        }
+    };
+
     const unread = notifs.filter(n => n.unread).length;
-    const filteredUsers = mockUsers.filter(u => {
-        if (userFilter !== "all" && u.role.toLowerCase() !== userFilter) return false;
-        if (searchQ && !u.name.toLowerCase().includes(searchQ.toLowerCase()) && !u.id.toLowerCase().includes(searchQ.toLowerCase())) return false;
+    const displayUsers = dbUsers.length > 0 ? dbUsers : mockUsers;
+    const filteredUsers = displayUsers.filter(u => {
+        const role = u.role || 'Citizen';
+        if (userFilter !== "all" && role.toLowerCase() !== userFilter) return false;
+        const name = u.full_name || u.name || '';
+        const id = u.department_id || u.badge_number || u.id || '';
+        if (searchQ && !name.toLowerCase().includes(searchQ.toLowerCase()) && !id.toLowerCase().includes(searchQ.toLowerCase())) return false;
         return true;
     });
 
@@ -165,86 +215,89 @@ const AdminDashboard = () => {
     // ── SECTION RENDERERS ──
     const R = {};
 
-    R.overview = () => (
-        <div className="space-y-5">
-            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
-                {[
-                    { l: "Total Complaints", v: stats.total, ic: <FileText size={18} />, c: "red", t: "+3 today" },
-                    { l: "Resolved Cases", v: stats.resolved, ic: <CheckCircle2 size={18} />, c: "green", t: "62% rate" },
-                    { l: "Active Investigation", v: stats.active, ic: <Search size={18} />, c: "blue", t: "28 critical" },
-                    { l: "Pending Review", v: stats.pending, ic: <Clock size={18} />, c: "amber", t: "Action needed" },
-                    { l: "Officers Active", v: stats.officers, ic: <Shield size={18} />, c: "purple", t: "4 on leave" },
-                    { l: "Police Stations", v: stats.stations, ic: <Building2 size={18} />, c: "blue", t: "All online" },
-                ].map((s, i) => (
-                    <motion.div key={i} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}
-                        className={`glass-card ad-stat ${s.c} p-4`}>
-                        <div className="flex items-center justify-between mb-2">
-                            <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500">{s.l}</span>
-                            <span className="text-slate-600">{s.ic}</span>
-                        </div>
-                        <div className="text-2xl font-bold text-white">{s.v}</div>
-                        <div className="text-[10px] text-slate-600 flex items-center gap-1 mt-1"><TrendingUp size={10} /> {s.t}</div>
-                    </motion.div>
-                ))}
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="glass-card p-5 lg:col-span-2">
-                    <h3 className="font-bold text-xs uppercase tracking-wider mb-4 flex items-center gap-2 text-slate-300"><BarChart3 size={14} className="text-red-400" /> Monthly Crime Trends</h3>
-                    <div className="flex items-end gap-3 h-36">
-                        {monthlyData.map((b, i) => (
-                            <div key={i} className="flex-1 flex flex-col items-center gap-1">
-                                <span className="text-[9px] font-mono text-slate-600">{b.v}</span>
-                                <motion.div initial={{ height: 0 }} animate={{ height: `${(b.v / 100) * 100}%` }}
-                                    transition={{ delay: 0.4 + i * 0.07, duration: 0.5 }}
-                                    className="ad-chart-bar w-full" style={{ background: `linear-gradient(180deg, ${b.v > 80 ? '#ff3366' : '#00d4ff'}, ${b.v > 80 ? 'rgba(255,51,102,0.15)' : 'rgba(0,212,255,0.15)'})` }} />
-                                <span className="text-[9px] font-mono text-slate-600">{b.m}</span>
+    R.overview = () => {
+        const o = backendStats?.overview || {};
+        return (
+            <div className="space-y-5">
+                <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+                    {[
+                        { l: "Total Complaints", v: o.totalComplaints || stats.total, ic: <FileText size={18} />, c: "red", t: "+3 today" },
+                        { l: "Resolved Cases", v: o.resolvedCases || stats.resolved, ic: <CheckCircle2 size={18} />, c: "green", t: "62% rate" },
+                        { l: "Active Investigation", v: o.activeCases || stats.active, ic: <Search size={18} />, c: "blue", t: "28 critical" },
+                        { l: "Pending Review", v: o.pendingComplaints || stats.pending, ic: <Clock size={18} />, c: "amber", t: "Action needed" },
+                        { l: "Officers Active", v: stats.officers, ic: <Shield size={18} />, c: "purple", t: "4 on leave" },
+                        { l: "Police Stations", v: stats.stations, ic: <Building2 size={18} />, c: "blue", t: "All online" },
+                    ].map((s, i) => (
+                        <motion.div key={i} initial={{ opacity: 0, y: 15 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.06 }}
+                            className={`glass-card ad-stat ${s.c} p-4`}>
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500">{s.l}</span>
+                                <span className="text-slate-600">{s.ic}</span>
                             </div>
-                        ))}
-                    </div>
-                </motion.div>
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="glass-card p-5">
-                    <h3 className="font-bold text-xs uppercase tracking-wider mb-4 text-slate-300">Crime by Category</h3>
-                    <div className="space-y-2.5">
-                        {crimeByType.map((c, i) => (
-                            <div key={i} className="flex items-center gap-3">
-                                <span className="w-2 h-2 rounded-full shrink-0" style={{ background: c.color }} />
-                                <span className="text-xs text-slate-400 flex-1">{c.type}</span>
-                                <div className="w-24 h-1.5 rounded-full bg-white/5 overflow-hidden">
-                                    <motion.div initial={{ width: 0 }} animate={{ width: `${c.pct}%` }} transition={{ delay: 0.5 + i * 0.08 }}
-                                        className="h-full rounded-full" style={{ background: c.color }} />
-                                </div>
-                                <span className="text-[10px] font-mono text-slate-500 w-8 text-right">{c.count}</span>
-                            </div>
-                        ))}
-                    </div>
-                </motion.div>
-            </div>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div className="glass-card p-5">
-                    <h3 className="font-bold text-xs uppercase tracking-wider mb-3 flex items-center gap-2 text-slate-300"><AlertTriangle size={14} className="text-red-400" /> Recent Complaints</h3>
-                    {realCases.length > 0 ? realCases.slice(0, 4).map((c, i) => (
-                        <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg bg-black/15 border border-white/5 mb-2 hover:border-red-400/15 transition-all cursor-pointer">
-                            <div className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
-                            <div className="flex-1 min-w-0">
-                                <div className="text-xs font-semibold text-slate-200 truncate">{c.complaint || c.description}</div>
-                                <div className="text-[9px] text-slate-600 font-mono">{c.caseId} · {c.status} · {c.reportedBy}</div>
-                            </div>
-                        </div>
-                    )) : <p className="text-xs text-slate-600 text-center py-6">No cases in database yet</p>}
-                </div>
-                <div className="glass-card p-5">
-                    <h3 className="font-bold text-xs uppercase tracking-wider mb-3 flex items-center gap-2 text-slate-300"><Target size={14} className="text-cyan-400" /> Station Overview</h3>
-                    {mockStations.map((s, i) => (
-                        <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg bg-black/15 border border-white/5 mb-2">
-                            <Building2 size={14} className="text-cyan-400 shrink-0" />
-                            <div className="flex-1"><div className="text-xs font-semibold text-slate-300">{s.name}</div><div className="text-[9px] text-slate-600">{s.officers} officers · {s.cases} cases</div></div>
-                            <span className={`text-[8px] font-bold uppercase px-2 py-0.5 rounded-full ${s.status === 'High Alert' ? 'bg-red-500/15 text-red-400 border border-red-400/20' : 'bg-green-500/15 text-green-400 border border-green-400/20'}`}>{s.status}</span>
-                        </div>
+                            <div className="text-2xl font-bold text-white">{s.v}</div>
+                            <div className="text-[10px] text-slate-600 flex items-center gap-1 mt-1"><TrendingUp size={10} /> {s.t}</div>
+                        </motion.div>
                     ))}
                 </div>
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="glass-card p-5 lg:col-span-2">
+                        <h3 className="font-bold text-xs uppercase tracking-wider mb-4 flex items-center gap-2 text-slate-300"><BarChart3 size={14} className="text-red-400" /> Monthly Crime Trends</h3>
+                        <div className="flex items-end gap-3 h-36">
+                            {monthlyData.map((b, i) => (
+                                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                                    <span className="text-[9px] font-mono text-slate-600">{b.v}</span>
+                                    <motion.div initial={{ height: 0 }} animate={{ height: `${(b.v / 100) * 100}%` }}
+                                        transition={{ delay: 0.4 + i * 0.07, duration: 0.5 }}
+                                        className="ad-chart-bar w-full" style={{ background: `linear-gradient(180deg, ${b.v > 80 ? '#ff3366' : '#00d4ff'}, ${b.v > 80 ? 'rgba(255,51,102,0.15)' : 'rgba(0,212,255,0.15)'})` }} />
+                                    <span className="text-[9px] font-mono text-slate-600">{b.m}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </motion.div>
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.4 }} className="glass-card p-5">
+                        <h3 className="font-bold text-xs uppercase tracking-wider mb-4 text-slate-300">Crime by Category</h3>
+                        <div className="space-y-2.5">
+                            {crimeByType.map((c, i) => (
+                                <div key={i} className="flex items-center gap-3">
+                                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: c.color }} />
+                                    <span className="text-xs text-slate-400 flex-1">{c.type}</span>
+                                    <div className="w-24 h-1.5 rounded-full bg-white/5 overflow-hidden">
+                                        <motion.div initial={{ width: 0 }} animate={{ width: `${c.pct}%` }} transition={{ delay: 0.5 + i * 0.08 }}
+                                            className="h-full rounded-full" style={{ background: c.color }} />
+                                    </div>
+                                    <span className="text-[10px] font-mono text-slate-500 w-8 text-right">{c.count}</span>
+                                </div>
+                            ))}
+                        </div>
+                    </motion.div>
+                </div>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div className="glass-card p-5">
+                        <h3 className="font-bold text-xs uppercase tracking-wider mb-3 flex items-center gap-2 text-slate-300"><AlertTriangle size={14} className="text-red-400" /> Recent Complaints</h3>
+                        {realCases.length > 0 ? realCases.slice(0, 4).map((c, i) => (
+                            <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg bg-black/15 border border-white/5 mb-2 hover:border-red-400/15 transition-all cursor-pointer">
+                                <div className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
+                                <div className="flex-1 min-w-0">
+                                    <div className="text-xs font-semibold text-slate-200 truncate">{c.complaint || c.description}</div>
+                                    <div className="text-[9px] text-slate-600 font-mono">{c.caseId} · {c.status} · {c.reportedBy}</div>
+                                </div>
+                            </div>
+                        )) : <p className="text-xs text-slate-600 text-center py-6">No cases in database yet</p>}
+                    </div>
+                    <div className="glass-card p-5">
+                        <h3 className="font-bold text-xs uppercase tracking-wider mb-3 flex items-center gap-2 text-slate-300"><Target size={14} className="text-cyan-400" /> Station Overview</h3>
+                        {mockStations.map((s, i) => (
+                            <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg bg-black/15 border border-white/5 mb-2">
+                                <Building2 size={14} className="text-cyan-400 shrink-0" />
+                                <div className="flex-1"><div className="text-xs font-semibold text-slate-300">{s.name}</div><div className="text-[9px] text-slate-600">{s.officers} officers · {s.cases} cases</div></div>
+                                <span className={`text-[8px] font-bold uppercase px-2 py-0.5 rounded-full ${s.status === 'High Alert' ? 'bg-red-500/15 text-red-400 border border-red-400/20' : 'bg-green-500/15 text-green-400 border border-green-400/20'}`}>{s.status}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
             </div>
-        </div>
-    );
+        );
+    };
 
     R.users = () => (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
@@ -267,7 +320,12 @@ const AdminDashboard = () => {
                             <td className="text-slate-500 text-xs">{u.email}</td>
                             <td><span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${u.status === 'Active' ? 'bg-green-500/15 text-green-400 border border-green-400/20' : u.status === 'Suspended' ? 'bg-red-500/15 text-red-400 border border-red-400/20' : 'bg-amber-500/15 text-amber-400 border border-amber-400/20'}`}>{u.status}</span></td>
                             <td className="text-slate-600 font-mono text-[10px]">{u.joined}</td>
-                            <td><div className="flex gap-1"><button className="p-1.5 rounded bg-white/5 text-slate-500 hover:text-white"><Edit3 size={12} /></button><button className="p-1.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white"><Trash2 size={12} /></button></div></td>
+                            <td><div className="flex gap-1">
+                                <button onClick={() => handleToggleUserStatus(u)} className={`p-1.5 rounded ${u.is_active ? 'bg-amber-500/10 text-amber-500' : 'bg-green-500/10 text-green-500'} hover:bg-opacity-20`}>
+                                    {u.is_active ? <X size={12} /> : <UserCheck size={12} />}
+                                </button>
+                                <button onClick={() => handleDeleteUser(u.id)} className="p-1.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white"><Trash2 size={12} /></button>
+                            </div></td>
                         </tr>
                     ))}</tbody>
                 </table>
@@ -530,13 +588,30 @@ const AdminDashboard = () => {
                     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="ad-modal-overlay" onClick={() => setShowModal(null)}>
                         <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }} className="ad-modal" onClick={e => e.stopPropagation()}>
                             <div className="flex items-center justify-between mb-5"><h2 className="font-bold text-white flex items-center gap-2"><UserPlus size={18} className="text-red-400" /> Add New User</h2><button onClick={() => setShowModal(null)} className="text-slate-500 hover:text-white"><X size={18} /></button></div>
-                            <div className="space-y-3">
-                                <div className="grid grid-cols-2 gap-3"><div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">First Name</label><input className="ad-input" /></div><div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Last Name</label><input className="ad-input" /></div></div>
-                                <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Email</label><input className="ad-input" type="email" /></div>
-                                <div className="grid grid-cols-2 gap-3"><div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Role</label><select className="ad-input"><option>Citizen</option><option>Police Officer</option><option>Staff</option></select></div><div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Status</label><select className="ad-input"><option>Active</option><option>Suspended</option></select></div></div>
-                                <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Password</label><input className="ad-input" type="password" /></div>
-                                <button className="ad-btn w-full mt-2 flex items-center justify-center gap-2"><Send size={14} /> Create User</button>
-                            </div>
+                            <form onSubmit={handleCreateUser} className="space-y-3">
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Full Name</label><input name="full_name" required className="ad-input" /></div>
+                                    <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Aadhaar (Citizen Only)</label><input name="aadhaar" className="ad-input" maxLength={12} /></div>
+                                </div>
+                                <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Email</label><input name="email" required className="ad-input" type="email" /></div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Role</label>
+                                        <select name="role" className="ad-input">
+                                            <option value="citizen">Citizen</option>
+                                            <option value="police">Police Officer</option>
+                                            <option value="staff">Staff</option>
+                                            <option value="admin">Admin</option>
+                                        </select>
+                                    </div>
+                                    <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Phone</label><input name="phone" required className="ad-input" /></div>
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                    <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Badge Number (Police)</label><input name="badge_number" className="ad-input" /></div>
+                                    <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Department ID</label><input name="department_id" className="ad-input" /></div>
+                                </div>
+                                <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Temporary Password</label><input name="password" required className="ad-input" type="password" /></div>
+                                <button type="submit" className="ad-btn w-full mt-2 flex items-center justify-center gap-2"><Send size={14} /> Create User</button>
+                            </form>
                         </motion.div>
                     </motion.div>
                 )}

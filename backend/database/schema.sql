@@ -364,7 +364,7 @@ DO $$ BEGIN
     END IF;
 END $$;
 
--- Users see their own notifications
+-- Citizens see their own notifications
 DO $$ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Users view own notifications' AND tablename = 'notifications') THEN
         CREATE POLICY "Users view own notifications"
@@ -372,3 +372,29 @@ DO $$ BEGIN
             USING (auth.uid()::text = user_id::text);
     END IF;
 END $$;
+
+-- ============================================================
+-- 13. RPC FUNCTIONS FOR DASHBOARD
+-- ============================================================
+
+-- Get counts of complaints grouped by status
+CREATE OR REPLACE FUNCTION get_complaint_status_counts()
+RETURNS TABLE (status text, count bigint) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT complaints.status::text, count(*)
+  FROM complaints
+  GROUP BY complaints.status;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Get counts of users grouped by role
+CREATE OR REPLACE FUNCTION get_user_role_counts()
+RETURNS TABLE (role text, count bigint) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT users.role::text, count(*)
+  FROM users
+  GROUP BY users.role;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;

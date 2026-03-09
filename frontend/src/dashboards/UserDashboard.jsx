@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
+import { api } from "../utils/api";
 import "./CitizenDashboard.css";
 
 // ─── MOCK DATA ──────────────────────────────────────────────────────
@@ -86,6 +87,35 @@ const UserDashboard = () => {
     // Profile
     const [profile, setProfile] = useState({ name: "Citizen", email: "", phone: "", address: "", aadhar: "" });
 
+    const [dbComplaints, setDbComplaints] = useState([]);
+    const [liveCount, setLiveCount] = useState({ active: 127, resolved: 843, officers: 56 });
+
+    const fetchUserData = async () => {
+        try {
+            // Fetch User's Complaints
+            const res = await api.get('/complaints/my');
+            if (res.success) setDbComplaints(res.data.data || []);
+
+            // Fetch Overview for stats
+            const overview = await api.get('/dashboard/overview');
+            if (overview.success) {
+                const o = overview.data.overview || {};
+                setLiveCount({
+                    active: o.activeCases || 127,
+                    resolved: o.resolvedCases || 843,
+                    officers: 64
+                });
+            }
+
+            // Fetch Notifications
+            const notifsRes = await api.get('/notifications');
+            if (notifsRes.success) setNotifications(notifsRes.data);
+
+        } catch (err) {
+            console.error("User Dashboard Refresh Error", err);
+        }
+    };
+
     useEffect(() => {
         const storedUser = localStorage.getItem('user');
         if (storedUser) {
@@ -98,19 +128,7 @@ const UserDashboard = () => {
                 aadhar: u.aadhaar || "XXXX-XXXX-XXXX"
             });
         }
-    }, []);
-
-    // Live stats animation
-    const [liveCount, setLiveCount] = useState({ active: 127, resolved: 843, officers: 56 });
-    useEffect(() => {
-        const interval = setInterval(() => {
-            setLiveCount(prev => ({
-                active: prev.active + (Math.random() > 0.5 ? 1 : 0),
-                resolved: prev.resolved + (Math.random() > 0.7 ? 1 : 0),
-                officers: prev.officers + (Math.random() > 0.9 ? 1 : -0)
-            }));
-        }, 5000);
-        return () => clearInterval(interval);
+        fetchUserData();
     }, []);
 
     const handleTrackCase = async (e) => {
@@ -118,35 +136,55 @@ const UserDashboard = () => {
         if (!trackingId) return;
         setTrackLoading(true); setTrackError(null); setFoundCase(null);
         try {
-            // First check supabase
-            const { data, error } = await supabase.from('complaints').select('*').eq('id', trackingId).single();
-            if (data && !error) { setFoundCase(data); }
-            else {
-                // Fallback to old backend if supabase fetch fails
-                const res = await fetch(`https://epolix-api.onrender.com/api/case/track/${trackingId}`);
-                if (res.ok) {
-                    const dataFallback = await res.json();
-                    if (dataFallback) setFoundCase(dataFallback);
-                    else setTrackError("Case ID not found.");
-                } else setTrackError("Case ID not found. Verify your ID.");
+            const res = await api.get(`/cases/track/${trackingId}`);
+            if (res.success) {
+                setFoundCase({
+                    caseId: res.data.case_number,
+                    status: mapStatus(res.data.status),
+                    description: res.data.title
+                });
             }
-        } catch { setTrackError("Tracking service unavailable. Try again later."); }
-        finally { setTrackLoading(false); }
+        } catch (err) {
+            setTrackError(err.message || "Case not found. Verify your ID.");
+        } finally {
+            setTrackLoading(false);
+        }
+    };
+
+    const mapStatus = (s) => {
+        const map = {
+            'open': 'Registered',
+            'assigned': 'Registered',
+            'under_investigation': 'Under Investigation',
+            'evidence_collection': 'Evidence Collected',
+            'chargesheet_filed': 'ChargeSheet Filed',
+            'closed': 'Resolved'
+        };
+        return map[s] || 'Registered';
     };
 
     const handleReportSubmit = async (e) => {
         e.preventDefault();
         setReportSubmitted(true);
-        // Save to Supabase
-        const complaintData = {
-            title: reportForm.crimeType,
-            description: reportForm.description,
-            crime_type: reportForm.crimeType,
-            location: reportForm.location,
-            status: "Pending",
-        };
-        await supabase.from('complaints').insert([complaintData]);
-        setTimeout(() => { setReportSubmitted(false); setShowReportModal(false); setReportForm({ crimeType: "", location: "", date: "", description: "", evidence: null }); }, 2500);
+        try {
+            const complaintData = {
+                title: reportForm.crimeType + " - " + reportForm.location,
+                description: reportForm.description,
+                category_name: reportForm.crimeType,
+                location: reportForm.location,
+                incident_date: reportForm.date
+            };
+            await api.post('/complaints', complaintData);
+            setTimeout(() => {
+                setReportSubmitted(false);
+                setShowReportModal(false);
+                setReportForm({ crimeType: "", location: "", date: "", description: "", evidence: null });
+                fetchUserData();
+            }, 2500);
+        } catch (err) {
+            alert(err.message);
+            setReportSubmitted(false);
+        }
     };
 
     const handleEmergency = () => {
@@ -205,6 +243,15 @@ const UserDashboard = () => {
                     </motion.div>
                 ))}
             </div>
+
+            {/* Quick Summary Alert if any pending cases */}
+            {dbComplaints.some(c => c.status === 'Pending') && (
+                <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="p-4 rounded-xl bg-amber-500/10 border border-amber-400/20 text-amber-400 text-xs flex items-center gap-3">
+                    <AlertCircle size={16} />
+                    <span>You have {dbComplaints.filter(c => c.status === 'Pending').length} complaints pending review.</span>
+                    <button onClick={() => setActiveSection("history")} className="ml-auto font-bold underline">View Status</button>
+                </motion.div>
+            )}
 
             {/* Crime Trend Chart + Quick Actions */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
@@ -284,20 +331,21 @@ const UserDashboard = () => {
                         <FileText size={16} className="text-cyan-400" /> Recent Complaints
                     </h3>
                     <div className="space-y-3">
-                        {mockComplaints.slice(0, 3).map((c, i) => (
-                            <div key={i} className="flex items-center gap-4 p-3 rounded-xl bg-black/20 border border-white/5 hover:border-cyan-400/20 transition-all cursor-pointer group">
+                        {dbComplaints.length > 0 ? dbComplaints.slice(0, 3).map((c, i) => (
+                            <div key={i} className="flex items-center gap-4 p-3 rounded-xl bg-black/20 border border-white/5 hover:border-cyan-400/20 transition-all cursor-pointer group"
+                                onClick={() => { setTrackingId(c.complaint_number); setActiveSection("track"); handleTrackCase({ preventDefault: () => { } }); }}>
                                 <div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center font-mono text-cyan-400 text-xs font-bold">
                                     #{i + 1}
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <div className="font-semibold text-sm text-slate-200 truncate">{c.description}</div>
-                                    <div className="text-[11px] text-slate-500 font-mono">{c.caseId} · {c.date}</div>
+                                    <div className="font-semibold text-sm text-slate-200 truncate">{c.title}</div>
+                                    <div className="text-[11px] text-slate-500 font-mono">{c.complaint_number} · {new Date(c.created_at).toLocaleDateString()}</div>
                                 </div>
-                                <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${statusColor(c.status)}`}>
-                                    {c.status}
+                                <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${statusColor(mapStatus(c.status))}`}>
+                                    {mapStatus(c.status)}
                                 </span>
                             </div>
-                        ))}
+                        )) : <p className="text-xs text-slate-500 text-center py-4">No complaints filed yet.</p>}
                     </div>
                 </motion.div>
 
@@ -382,14 +430,15 @@ const UserDashboard = () => {
                         </tr>
                     </thead>
                     <tbody>
-                        {mockComplaints.map((c, i) => (
-                            <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors cursor-pointer">
-                                <td className="py-3 font-mono text-cyan-400 font-semibold">{c.caseId}</td>
-                                <td className="py-3 text-slate-300">{c.type}</td>
-                                <td className="py-3 text-slate-400 font-mono text-xs">{c.date}</td>
+                        {(dbComplaints.length > 0 ? dbComplaints : mockComplaints).map((c, i) => (
+                            <tr key={i} className="border-b border-white/5 hover:bg-white/5 transition-colors cursor-pointer"
+                                onClick={() => { setTrackingId(c.complaint_number || c.caseId); setActiveSection("track"); }}>
+                                <td className="py-3 font-mono text-cyan-400 font-semibold">{c.complaint_number || c.caseId}</td>
+                                <td className="py-3 text-slate-300">{c.category_name || c.type}</td>
+                                <td className="py-3 text-slate-400 font-mono text-xs">{c.created_at ? new Date(c.created_at).toLocaleDateString() : c.date}</td>
                                 <td className="py-3 text-slate-400">{c.location}</td>
-                                <td className="py-3 text-slate-300">{c.officer}</td>
-                                <td className="py-3"><span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${statusColor(c.status)}`}>{c.status}</span></td>
+                                <td className="py-3 text-slate-300">{c.officer || "Pending"}</td>
+                                <td className="py-3"><span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase ${statusColor(mapStatus(c.status))}`}>{mapStatus(c.status)}</span></td>
                             </tr>
                         ))}
                     </tbody>

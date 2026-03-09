@@ -9,6 +9,7 @@ import {
     UserCheck, Building2, Mail, Phone, Fingerprint
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { api } from "../utils/api";
 import "./StaffDashboard.css";
 
 const complaints = [
@@ -53,11 +54,89 @@ const StaffDashboard = () => {
     // Staff Info
     const [staff, setStaff] = useState({ fullName: "Staff Sita R.", staffId: "STF-901", department: "Data Entry & Case Processing", role: "Clerk" });
 
+    const [dbComplaints, setDbComplaints] = useState([]);
+    const [dbCaseFiles, setDbCaseFiles] = useState([]);
+    const [dbNotifications, setDbNotifications] = useState([]);
+
+    const fetchStaffData = async () => {
+        try {
+            // Fetch All Complaints
+            const compRes = await api.get('/complaints');
+            if (compRes.success) {
+                setDbComplaints(mapComplaints(compRes.data));
+                setStats(prev => ({
+                    ...prev,
+                    total: compRes.pagination?.total || compRes.data.length,
+                    pending: compRes.data.filter(c => c.status === 'submitted').length,
+                    verified: compRes.data.filter(c => c.status === 'verified').length
+                }));
+            }
+
+            // Fetch Case Files
+            const casesRes = await api.get('/cases');
+            if (casesRes.success) {
+                setDbCaseFiles(mapCaseFiles(casesRes.data.data));
+                setStats(prev => ({
+                    ...prev,
+                    filed: casesRes.pagination?.total || casesRes.data.data.length
+                }));
+            }
+
+            // Fetch Notifications
+            const notifsRes = await api.get('/notifications');
+            if (notifsRes.success) setDbNotifications(notifsRes.data);
+
+        } catch (err) {
+            console.error("Staff Dashboard Refresh Error", err);
+        }
+    };
+
+    const mapComplaints = (list) => {
+        return (list || []).map(c => ({
+            id: c.complaint_number,
+            realId: c.id,
+            title: c.title,
+            type: c.category_name || 'General',
+            status: mapStatus(c.status),
+            date: new Date(c.created_at).toLocaleDateString(),
+            citizen: c.complainant?.full_name || 'Citizen',
+            location: c.location || 'Unknown',
+            desc: c.description,
+            verified: c.status !== 'submitted'
+        }));
+    };
+
+    const mapCaseFiles = (list) => {
+        return (list || []).map(c => ({
+            id: `CF-${c.case_number?.split('-').pop()}`,
+            caseId: c.case_number,
+            fir: c.fir_number || 'Pending',
+            status: c.status === 'open' ? 'Active' : c.status === 'closed' ? 'Closed' : 'Active',
+            officer: c.officer?.full_name || 'Unassigned',
+            docs: 0,
+            evidence: 0,
+            lastUpdated: new Date(c.updated_at).toLocaleDateString()
+        }));
+    };
+
+    const mapStatus = (s) => {
+        const map = {
+            'submitted': 'Pending Verification',
+            'verified': 'Verified',
+            'fir_filed': 'FIR Filed',
+            'case_filed': 'Case Filed',
+            'under_investigation': 'Under Investigation',
+            'closed': 'Resolved'
+        };
+        return map[s] || 'Pending Verification';
+    };
+
     useEffect(() => {
         const storedUser = localStorage.getItem('user');
         if (storedUser) setStaff(JSON.parse(storedUser));
+        fetchStaffData();
 
-        const iv = setInterval(() => setStats(p => ({ ...p, total: p.total + (Math.random() > 0.8 ? 1 : 0) })), 9000);
+        const iv = setInterval(fetchStaffData, 30000);
         return () => clearInterval(iv);
     }, []);
 
@@ -115,18 +194,23 @@ const StaffDashboard = () => {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                 <div className="glass-card p-5">
                     <h3 className="font-bold text-xs uppercase tracking-wider mb-3 flex items-center gap-2 text-slate-300"><AlertCircle size={14} className="text-amber-400" /> Pending Verification</h3>
-                    {compList.filter(c => !c.verified).map((c, i) => (
+                    {dbComplaints.filter(c => !c.verified).map((c, i) => (
                         <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg bg-black/15 border border-white/5 mb-2 hover:border-emerald-400/15 transition-all">
                             <div className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
                             <div className="flex-1 min-w-0"><div className="text-xs font-semibold text-slate-200 truncate">{c.title} — {c.citizen}</div><div className="text-[9px] text-slate-600 font-mono">{c.id} · {c.date}</div></div>
-                            <button onClick={() => { setCompList(prev => prev.map(x => x.id === c.id ? { ...x, verified: true, status: "Verified" } : x)); setStats(p => ({ ...p, pending: p.pending - 1, verified: p.verified + 1 })) }} className="px-2 py-1 rounded text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-400/20 hover:bg-emerald-500/20">Verify</button>
+                            <button onClick={async () => {
+                                try {
+                                    await api.put(`/complaints/${c.realId}`, { status: 'verified' });
+                                    fetchStaffData();
+                                } catch (err) { alert(err.message); }
+                            }} className="px-2 py-1 rounded text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-400/20 hover:bg-emerald-500/20">Verify</button>
                         </div>
                     ))}
-                    {compList.filter(c => !c.verified).length === 0 && <p className="text-xs text-slate-600 text-center py-4">All complaints verified ✓</p>}
+                    {dbComplaints.filter(c => !c.verified).length === 0 && <p className="text-xs text-slate-600 text-center py-4">All complaints verified ✓</p>}
                 </div>
                 <div className="glass-card p-5">
                     <h3 className="font-bold text-xs uppercase tracking-wider mb-3 flex items-center gap-2 text-slate-300"><Briefcase size={14} className="text-cyan-400" /> Active Case Files</h3>
-                    {caseFiles.filter(c => c.status === "Active").map((c, i) => (
+                    {(dbCaseFiles.length > 0 ? dbCaseFiles : caseFiles).filter(c => c.status === "Active").map((c, i) => (
                         <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg bg-black/15 border border-white/5 mb-2">
                             <div className="w-2 h-2 rounded-full bg-cyan-400 shrink-0" />
                             <div className="flex-1 min-w-0"><div className="text-xs font-semibold text-slate-200">{c.id} · {c.caseId}</div><div className="text-[9px] text-slate-600">Officer: {c.officer} · {c.docs} docs · {c.evidence} evidence</div></div>
@@ -135,12 +219,12 @@ const StaffDashboard = () => {
                     ))}
                 </div>
             </div>
-            <div className="glass-card p-5">
+            <div className="glass-card p-5 mt-4">
                 <h3 className="font-bold text-xs uppercase tracking-wider mb-3 flex items-center gap-2 text-slate-300"><Bell size={14} className="text-red-400" /> Recent Activity</h3>
-                <div className="space-y-2">{notifs.map(n => (
-                    <div key={n.id} className={`p-2.5 rounded-lg text-xs flex items-start gap-2 ${n.unread ? 'bg-emerald-500/5 border border-emerald-400/10' : 'bg-black/15 border border-white/5'}`}>
-                        <Activity size={12} className={`shrink-0 mt-0.5 ${n.unread ? 'text-emerald-400' : 'text-slate-600'}`} />
-                        <div className="flex-1"><p className={n.unread ? 'text-slate-200' : 'text-slate-500'}>{n.msg}</p><span className="text-[9px] text-slate-600">{n.time}</span></div>
+                <div className="space-y-2">{(dbNotifications.length > 0 ? dbNotifications : notifs).map(n => (
+                    <div key={n.id} className={`p-2.5 rounded-lg text-xs flex items-start gap-2 ${n.is_read === false || n.unread ? 'bg-emerald-500/5 border border-emerald-400/10' : 'bg-black/15 border border-white/5'}`}>
+                        <Activity size={12} className={`shrink-0 mt-0.5 ${n.is_read === false || n.unread ? 'text-emerald-400' : 'text-slate-600'}`} />
+                        <div className="flex-1"><p className={n.is_read === false || n.unread ? 'text-slate-200' : 'text-slate-500'}>{n.message || n.msg}</p><span className="text-[9px] text-slate-600">{n.time || new Date(n.created_at).toLocaleTimeString()}</span></div>
                     </div>
                 ))}</div>
             </div>
@@ -153,7 +237,7 @@ const StaffDashboard = () => {
                 <button onClick={() => setShowModal('newComplaint')} className="sd-btn text-xs flex items-center gap-1"><PlusCircle size={13} /> New Entry</button></div>
             <div className="glass-card overflow-hidden">
                 <table className="sd-table"><thead><tr>{["ID", "Title", "Type", "Citizen", "Location", "Date", "Status", "Action"].map(h => <th key={h}>{h}</th>)}</tr></thead>
-                    <tbody>{compList.map((c, i) => (
+                    <tbody>{(dbComplaints.length > 0 ? dbComplaints : compList).map((c, i) => (
                         <tr key={i}>
                             <td className="font-mono text-cyan-400 text-xs font-bold">{c.id}</td>
                             <td className="text-slate-300 font-semibold">{c.title}</td>
@@ -162,7 +246,10 @@ const StaffDashboard = () => {
                             <td className="text-slate-500">{c.location}</td>
                             <td className="text-slate-600 font-mono text-[10px]">{c.date}</td>
                             <td><span className={`text-[8px] font-bold uppercase px-2 py-0.5 rounded-full ${statusBadge(c.status)}`}>{c.status}</span></td>
-                            <td><div className="flex gap-1"><button className="p-1.5 rounded bg-white/5 text-slate-500 hover:text-white"><Edit3 size={11} /></button><button className="p-1.5 rounded bg-white/5 text-slate-500 hover:text-white"><Eye size={11} /></button></div></td>
+                            <td><div className="flex gap-1">
+                                <button className="p-1.5 rounded bg-white/5 text-slate-500 hover:text-white" onClick={() => setShowModal({ type: 'editComplaint', data: c })}><Edit3 size={11} /></button>
+                                <button className="p-1.5 rounded bg-white/5 text-slate-500 hover:text-white"><Eye size={11} /></button>
+                            </div></td>
                         </tr>
                     ))}</tbody>
                 </table>
@@ -173,14 +260,19 @@ const StaffDashboard = () => {
     R.verify = () => (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
             <h2 className="text-lg font-bold flex items-center gap-2 text-emerald-400"><CheckCircle2 size={20} /> Complaint Verification</h2>
-            {compList.map((c, i) => (
+            {(dbComplaints.length > 0 ? dbComplaints : compList).map((c, i) => (
                 <div key={i} className="glass-card p-5 flex items-start gap-4">
                     <div className={`w-3 h-3 rounded-full mt-1 shrink-0 ${c.verified ? 'bg-emerald-400' : 'bg-amber-400 animate-pulse'}`} />
                     <div className="flex-1">
                         <div className="flex items-center gap-2 mb-1 flex-wrap"><span className="font-mono text-cyan-400 text-xs font-bold">{c.id}</span><span className="font-semibold text-sm text-slate-200">{c.title}</span><span className={`text-[8px] font-bold uppercase px-2 py-0.5 rounded-full ${statusBadge(c.status)}`}>{c.status}</span></div>
                         <p className="text-xs text-slate-500 mb-2">"{c.desc}" — {c.citizen}, {c.location}, {c.date}</p>
                         <div className="flex gap-2">
-                            {!c.verified && <button onClick={() => { setCompList(prev => prev.map(x => x.id === c.id ? { ...x, verified: true, status: "Verified" } : x)); setStats(p => ({ ...p, pending: p.pending - 1, verified: p.verified + 1 })) }} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-400/20 hover:bg-emerald-500/20 flex items-center gap-1"><CheckCircle2 size={12} /> Verify</button>}
+                            {!c.verified && <button onClick={async () => {
+                                try {
+                                    await api.put(`/complaints/${c.realId}`, { status: 'verified' });
+                                    fetchStaffData();
+                                } catch (err) { alert(err.message); }
+                            }} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-400/20 hover:bg-emerald-500/20 flex items-center gap-1"><CheckCircle2 size={12} /> Verify</button>}
                             {!c.verified && <button className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-500/10 text-red-400 border border-red-400/20 hover:bg-red-500/20 flex items-center gap-1"><X size={12} /> Reject</button>}
                             {c.verified && <span className="text-xs text-emerald-400 flex items-center gap-1"><CheckCircle2 size={12} /> Verified</span>}
                         </div>
