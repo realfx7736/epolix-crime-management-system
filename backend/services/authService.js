@@ -484,37 +484,45 @@ const citizenLogin = async (aadhaarNumber, ipAddress) => {
         throw new Error('Invalid Aadhaar number format. Must be 12 digits.');
     }
 
-    const { data: users, error } = await supabase
+    // Try primary optimized query first
+    const { data: matchedUser, error } = await supabase
         .from('users')
-        .select('*')
-        .eq('is_active', true);
+        .select('id, full_name, email, phone, aadhaar, is_active, is_locked, locked_until')
+        .eq('aadhaar', cleaned)
+        .eq('role', 'citizen')
+        .eq('is_active', true)
+        .single();
 
-    if (error) throw new Error('Database error during citizen verification.');
+    // Fallback for legacy hashing or local dev
+    if (error || !matchedUser) {
+        const { data: users, error: fetchError } = await supabase
+            .from('users')
+            .select('*')
+            .eq('is_active', true);
 
-    let matchedUser = null;
-    for (const user of (users || [])) {
-        if (user.role && user.role !== 'citizen') continue;
-
-        if (user.aadhaar_hash) {
-            const match = await bcrypt.compare(cleaned, user.aadhaar_hash);
-            if (match) {
-                matchedUser = user;
-                break;
+        let loopMatch = null;
+        if (!fetchError && users) {
+            for (const user of users) {
+                if (user.role && user.role !== 'citizen') continue;
+                if (user.aadhaar_hash && await bcrypt.compare(cleaned, user.aadhaar_hash)) {
+                    loopMatch = user;
+                    break;
+                }
             }
-            continue;
         }
 
-        if (user.aadhaar && String(user.aadhaar).replace(/\s|-/g, '') === cleaned) {
-            matchedUser = user;
-            break;
+        if (!loopMatch) {
+            await logLoginActivity(null, 'citizen', 'login_attempt', false, ipAddress, 'Invalid Aadhaar');
+            throw new Error('Aadhaar number not found in the system. Please verify your number.');
         }
+        // Proceed with loopMatch
+        return handleSuccessfulCitizenMatch(loopMatch, ipAddress);
     }
 
-    if (!matchedUser) {
-        await logLoginActivity(null, 'citizen', 'login_attempt', false, ipAddress, 'Invalid Aadhaar');
-        throw new Error('Aadhaar number not found in the system. Please verify your number.');
-    }
+    return handleSuccessfulCitizenMatch(matchedUser, ipAddress);
+};
 
+const handleSuccessfulCitizenMatch = async (matchedUser, ipAddress) => {
     if (matchedUser.is_locked && matchedUser.locked_until && new Date(matchedUser.locked_until) > new Date()) {
         throw new Error('Account temporarily locked. Please contact police station.');
     }
@@ -553,24 +561,6 @@ const terminalLogin = async (role, identifier, password, ipAddress) => {
     }
 
     const normalizedIdentifier = (identifier || '').trim();
-
-    if (role === 'police' && !isValidPoliceId(normalizedIdentifier) && !isValidEmail(normalizedIdentifier)) {
-        await logLoginActivity(null, role, 'login_attempt', false, ipAddress, `Invalid police ID format: ${identifier}`);
-        throw new Error('Invalid Police ID format. Expected format: OFF-XXXXXX');
-    }
-    if (role === 'staff' && !isValidStaffId(normalizedIdentifier) && !isValidEmail(normalizedIdentifier)) {
-        await logLoginActivity(null, role, 'login_attempt', false, ipAddress, `Invalid staff ID format: ${identifier}`);
-        throw new Error('Invalid Staff ID format. Expected format: STF-XXXXXX');
-    }
-    if (role === 'admin') {
-        const isValidId = isValidAdminId(normalizedIdentifier);
-        const isValidMail = isValidEmail(normalizedIdentifier);
-        if (!isValidId && !isValidMail) {
-            await logLoginActivity(null, role, 'login_attempt', false, ipAddress, `Invalid admin ID/email: ${identifier}`);
-            throw new Error('Invalid Admin ID format (ADM-KL-2026-XXXX) or email address.');
-        }
-    }
-
     const resolved = await findTerminalUser(role, normalizedIdentifier);
     let user = resolved.user;
     let table = resolved.table || getTableForRole(role) || 'users';
@@ -849,20 +839,21 @@ const registerPoliceOfficer = async (data) => {
     const policeId = `OFF-${String((count || 0) + 1).padStart(3, '0')}`;
 
     const { data: officer, error } = await supabase.from('users').insert([{
+        role: 'police',
+        badge_number: policeId,
+        department_id: policeId,
         full_name: fullName.trim(),
         email: emailLower,
         phone: phone.trim(),
         password_hash: passwordHash,
-        role: 'police',
-        department_id: policeId,
-        badge_number: policeId,
         rank,
         station,
-        district: department || null,
+        district: department || 'General',
         is_active: true,
         is_verified: true,
         is_locked: false,
         login_attempts: 0,
+        created_at: new Date().toISOString()
     }]).select().single();
 
     if (error) throw new Error(`Failed to register officer: ${error.message}`);
@@ -931,18 +922,19 @@ const registerStaff = async (data) => {
     const staffId = `STF-${String((count || 0) + 1).padStart(3, '0')}`;
 
     const { data: staff, error } = await supabase.from('users').insert([{
+        role: 'staff',
+        department_id: staffId,
         full_name: fullName.trim(),
         email: emailLower,
         phone: phone.trim(),
         password_hash: passwordHash,
-        role: 'staff',
-        department_id: staffId,
         station: department,
         rank: jobRole || 'Clerk',
         is_active: true,
         is_verified: true,
         is_locked: false,
         login_attempts: 0,
+        created_at: new Date().toISOString()
     }]).select().single();
 
     if (error) throw new Error(`Failed to register staff: ${error.message}`);
@@ -1016,17 +1008,19 @@ const registerAdmin = async (data) => {
     const adminId = `ADM-KL-${year}-${String((count || 0) + 1).padStart(4, '0')}`;
 
     const { data: admin, error } = await supabase.from('users').insert([{
+        role: adminRole === 'super_admin' ? 'admin' : (adminRole || 'admin'),
+        badge_number: adminId,
+        department_id: adminId,
         full_name: fullName.trim(),
         email: emailLower,
         phone: phone.trim(),
         password_hash: passwordHash,
-        role: adminRole === 'super_admin' ? 'admin' : (adminRole || 'admin'),
-        department_id: adminId,
         station: 'HQ',
         is_active: true,
         is_verified: true,
         is_locked: false,
         login_attempts: 0,
+        created_at: new Date().toISOString()
     }]).select().single();
 
     if (error) throw new Error(`Failed to register admin: ${error.message}`);
@@ -1080,17 +1074,19 @@ const seedDatabase = async () => {
             }
 
             const { error } = await supabase.from('users').insert([{
+                role: 'admin',
+                badge_number: SUPER_ADMIN_ID,
+                department_id: SUPER_ADMIN_ID,
                 full_name: 'Super Administrator',
                 email: SUPER_ADMIN_EMAIL,
                 phone: '+919000000000',
                 password_hash: passwordHash,
-                role: 'admin',
-                department_id: SUPER_ADMIN_ID,
                 station: 'HQ',
                 is_active: true,
                 is_verified: true,
                 is_locked: false,
                 login_attempts: 0,
+                created_at: new Date().toISOString()
             }]);
 
             if (error) throw error;

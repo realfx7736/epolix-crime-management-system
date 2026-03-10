@@ -4,13 +4,13 @@ const path = require('path');
 const ApiError = require('../utils/ApiError');
 const { supabase } = require('../config/supabase');
 
-// ─── Role-to-table mapping ──────────────────────────────────────────────────
+// ─── Role-to-table mapping (Unified Users Table) ────────────────────────────
 const ROLE_TABLE_MAP = {
     citizen: 'users',
-    police: 'police_officers',
-    staff: 'staff_members',
-    admin: 'admin_users',
-    super_admin: 'admin_users',
+    police: 'users',
+    staff: 'users',
+    admin: 'users',
+    super_admin: 'users',
 };
 
 const LOCAL_DB_PATH = path.join(__dirname, '../data/local_db.json');
@@ -98,6 +98,7 @@ const mapLocalUser = (localUser) => ({
     is_active: localUser.active !== false,
     is_locked: false,
     locked_until: null,
+    login_attempts: 0,
 });
 
 const findLocalUserById = (role, userId) => {
