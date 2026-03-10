@@ -71,11 +71,11 @@ npm run dev           # Start frontend + backend concurrently
 ```
 
 - Frontend: http://localhost:5173
-- Backend: http://localhost:5000
+- Backend: http://localhost:5001
 
 ### 5. Seed super admin
 ```bash
-curl -X POST http://localhost:5000/api/auth/seed
+curl -X POST http://localhost:5001/api/auth/seed
 ```
 Default admin credentials:
 - **Admin ID:** `ADM-KL-2026-0001`

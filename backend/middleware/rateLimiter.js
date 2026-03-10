@@ -7,7 +7,7 @@ const apiLimiter = rateLimit({
     standardHeaders: true,
     legacyHeaders: false,
     message: { success: false, error: 'Too many requests. Please wait and try again.' },
-    skip: (req) => req.path === '/api/health',
+    skip: (req) => req.path === '/health',
 });
 
 // ─── Strict auth rate limiter (login/OTP) ─────────────────────────────────

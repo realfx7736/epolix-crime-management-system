@@ -94,7 +94,9 @@ const UserDashboard = () => {
         try {
             // Fetch User's Complaints
             const res = await api.get('/complaints/my');
-            if (res.success) setDbComplaints(res.data.data || []);
+            if (res.success) {
+                setDbComplaints(Array.isArray(res.data) ? res.data : []);
+            }
 
             // Fetch Overview for stats
             const overview = await api.get('/dashboard/overview');
@@ -109,7 +111,15 @@ const UserDashboard = () => {
 
             // Fetch Notifications
             const notifsRes = await api.get('/notifications');
-            if (notifsRes.success) setNotifications(notifsRes.data);
+            if (notifsRes.success) {
+                const normalized = (Array.isArray(notifsRes.data) ? notifsRes.data : []).map((n) => ({
+                    ...n,
+                    msg: n.msg || n.message,
+                    time: n.time || (n.created_at ? new Date(n.created_at).toLocaleString() : 'Just now'),
+                    unread: n.unread ?? n.is_read === false
+                }));
+                setNotifications(normalized);
+            }
 
         } catch (err) {
             console.error("User Dashboard Refresh Error", err);
@@ -131,12 +141,13 @@ const UserDashboard = () => {
         fetchUserData();
     }, []);
 
-    const handleTrackCase = async (e) => {
-        e.preventDefault();
-        if (!trackingId) return;
+    const handleTrackCase = async (e, caseNumber = trackingId) => {
+        e?.preventDefault?.();
+        const targetCaseId = (caseNumber || '').trim();
+        if (!targetCaseId) return;
         setTrackLoading(true); setTrackError(null); setFoundCase(null);
         try {
-            const res = await api.get(`/cases/track/${trackingId}`);
+            const res = await api.get(`/cases/track/${targetCaseId}`);
             if (res.success) {
                 setFoundCase({
                     caseId: res.data.case_number,
@@ -152,15 +163,23 @@ const UserDashboard = () => {
     };
 
     const mapStatus = (s) => {
+        const normalized = (s || '').toString().toLowerCase();
         const map = {
             'open': 'Registered',
             'assigned': 'Registered',
             'under_investigation': 'Under Investigation',
             'evidence_collection': 'Evidence Collected',
             'chargesheet_filed': 'ChargeSheet Filed',
-            'closed': 'Resolved'
+            'closed': 'Resolved',
+            'submitted': 'Pending',
+            'under_review': 'Pending',
+            'verified': 'Verified',
+            'investigation': 'Under Investigation',
+            'resolved': 'Resolved',
+            'pending': 'Pending',
+            'under investigation': 'Under Investigation'
         };
-        return map[s] || 'Registered';
+        return map[normalized] || s || 'Registered';
     };
 
     const handleReportSubmit = async (e) => {
@@ -193,7 +212,7 @@ const UserDashboard = () => {
         setTimeout(() => setShowEmergency(false), 5000);
     };
 
-    const unreadCount = notifications.filter(n => n.unread).length;
+    const unreadCount = notifications.filter(n => n.unread || n.is_read === false).length;
 
     const navItems = [
         { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard size={18} /> },
@@ -218,17 +237,22 @@ const UserDashboard = () => {
         return "text-green-400";
     };
 
+    const pendingComplaints = dbComplaints.filter(c => {
+        const status = (c.status || '').toString().toLowerCase();
+        return status === 'submitted' || status === 'under_review' || status === 'pending' || status === 'under investigation';
+    });
+
     // ─── RENDER SECTIONS ──────────────────────────────────
     const renderDashboard = () => (
         <div className="space-y-6">
             {/* Stat Widgets */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                {[
-                    { label: "Active Cases", value: liveCount.active, icon: <Activity size={20} />, color: "#00d4ff", trend: "+3 today" },
-                    { label: "Cases Resolved", value: liveCount.resolved, icon: <CheckCircle2 size={20} />, color: "#00ff88", trend: "+12 this week" },
-                    { label: "Officers on Duty", value: liveCount.officers, icon: <Shield size={20} />, color: "#ffaa00", trend: "3 shifts" },
-                    { label: "My Complaints", value: mockComplaints.length, icon: <FileText size={20} />, color: "#ff3366", trend: "1 pending" },
-                ].map((stat, i) => (
+                    {[
+                        { label: "Active Cases", value: liveCount.active, icon: <Activity size={20} />, color: "#00d4ff", trend: "+3 today" },
+                        { label: "Cases Resolved", value: liveCount.resolved, icon: <CheckCircle2 size={20} />, color: "#00ff88", trend: "+12 this week" },
+                        { label: "Officers on Duty", value: liveCount.officers, icon: <Shield size={20} />, color: "#ffaa00", trend: "3 shifts" },
+                        { label: "My Complaints", value: dbComplaints.length > 0 ? dbComplaints.length : mockComplaints.length, icon: <FileText size={20} />, color: "#ff3366", trend: "1 pending" },
+                    ].map((stat, i) => (
                     <motion.div key={i} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}
                         className="glass-card cd-stat-widget p-5"
                     >
@@ -245,10 +269,10 @@ const UserDashboard = () => {
             </div>
 
             {/* Quick Summary Alert if any pending cases */}
-            {dbComplaints.some(c => c.status === 'Pending') && (
+            {pendingComplaints.length > 0 && (
                 <motion.div initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} className="p-4 rounded-xl bg-amber-500/10 border border-amber-400/20 text-amber-400 text-xs flex items-center gap-3">
                     <AlertCircle size={16} />
-                    <span>You have {dbComplaints.filter(c => c.status === 'Pending').length} complaints pending review.</span>
+                    <span>You have {pendingComplaints.length} complaints pending review.</span>
                     <button onClick={() => setActiveSection("history")} className="ml-auto font-bold underline">View Status</button>
                 </motion.div>
             )}
@@ -333,7 +357,7 @@ const UserDashboard = () => {
                     <div className="space-y-3">
                         {dbComplaints.length > 0 ? dbComplaints.slice(0, 3).map((c, i) => (
                             <div key={i} className="flex items-center gap-4 p-3 rounded-xl bg-black/20 border border-white/5 hover:border-cyan-400/20 transition-all cursor-pointer group"
-                                onClick={() => { setTrackingId(c.complaint_number); setActiveSection("track"); handleTrackCase({ preventDefault: () => { } }); }}>
+                                onClick={() => { setTrackingId(c.complaint_number); setActiveSection("track"); handleTrackCase(null, c.complaint_number); }}>
                                 <div className="w-10 h-10 rounded-lg bg-cyan-500/10 flex items-center justify-center font-mono text-cyan-400 text-xs font-bold">
                                     #{i + 1}
                                 </div>

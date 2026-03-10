@@ -63,28 +63,30 @@ const StaffDashboard = () => {
             // Fetch All Complaints
             const compRes = await api.get('/complaints');
             if (compRes.success) {
-                setDbComplaints(mapComplaints(compRes.data));
+                const complaintsList = Array.isArray(compRes.data) ? compRes.data : [];
+                setDbComplaints(mapComplaints(complaintsList));
                 setStats(prev => ({
                     ...prev,
-                    total: compRes.pagination?.total || compRes.data.length,
-                    pending: compRes.data.filter(c => c.status === 'submitted').length,
-                    verified: compRes.data.filter(c => c.status === 'verified').length
+                    total: compRes.pagination?.total || complaintsList.length,
+                    pending: complaintsList.filter(c => c.status === 'submitted').length,
+                    verified: complaintsList.filter(c => c.status === 'verified').length
                 }));
             }
 
             // Fetch Case Files
             const casesRes = await api.get('/cases');
             if (casesRes.success) {
-                setDbCaseFiles(mapCaseFiles(casesRes.data.data));
+                const caseList = Array.isArray(casesRes.data) ? casesRes.data : [];
+                setDbCaseFiles(mapCaseFiles(caseList));
                 setStats(prev => ({
                     ...prev,
-                    filed: casesRes.pagination?.total || casesRes.data.data.length
+                    filed: casesRes.pagination?.total || caseList.length
                 }));
             }
 
             // Fetch Notifications
             const notifsRes = await api.get('/notifications');
-            if (notifsRes.success) setDbNotifications(notifsRes.data);
+            if (notifsRes.success) setDbNotifications(Array.isArray(notifsRes.data) ? notifsRes.data : []);
 
         } catch (err) {
             console.error("Staff Dashboard Refresh Error", err);
@@ -112,7 +114,7 @@ const StaffDashboard = () => {
             caseId: c.case_number,
             fir: c.fir_number || 'Pending',
             status: c.status === 'open' ? 'Active' : c.status === 'closed' ? 'Closed' : 'Active',
-            officer: c.officer?.full_name || 'Unassigned',
+            officer: c.officer?.full_name || c.assigned_officer?.full_name || 'Unassigned',
             docs: 0,
             evidence: 0,
             lastUpdated: new Date(c.updated_at).toLocaleDateString()
@@ -140,7 +142,7 @@ const StaffDashboard = () => {
         return () => clearInterval(iv);
     }, []);
 
-    const unread = notifs.filter(n => n.unread).length;
+    const unread = (dbNotifications.length > 0 ? dbNotifications : notifs).filter(n => n.unread || n.is_read === false).length;
     const statusBadge = (s) => {
         if (s.includes("Pending")) return "bg-amber-500/15 text-amber-400 border border-amber-400/20";
         if (s === "Verified") return "bg-cyan-500/15 text-cyan-400 border border-cyan-400/20";
@@ -287,7 +289,7 @@ const StaffDashboard = () => {
             <h2 className="text-lg font-bold flex items-center gap-2 text-emerald-400"><Briefcase size={20} /> Case File Management</h2>
             <div className="glass-card overflow-hidden">
                 <table className="sd-table"><thead><tr>{["File ID", "Case ID", "FIR", "Officer", "Status", "Docs", "Evidence", "Updated"].map(h => <th key={h}>{h}</th>)}</tr></thead>
-                    <tbody>{caseFiles.map((c, i) => (
+                    <tbody>{(dbCaseFiles.length > 0 ? dbCaseFiles : caseFiles).map((c, i) => (
                         <tr key={i} className="cursor-pointer">
                             <td className="font-mono text-emerald-400 text-xs font-bold">{c.id}</td>
                             <td className="font-mono text-cyan-400 text-xs">{c.caseId}</td>
@@ -330,7 +332,7 @@ const StaffDashboard = () => {
             <div className="flex items-center justify-between"><h2 className="text-lg font-bold flex items-center gap-2 text-emerald-400"><Camera size={20} /> Evidence Upload</h2>
                 <button onClick={() => setShowModal('uploadEvidence')} className="sd-btn text-xs flex items-center gap-1"><Upload size={13} /> Upload</button></div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {caseFiles.map((c, i) => (
+                {(dbCaseFiles.length > 0 ? dbCaseFiles : caseFiles).map((c, i) => (
                     <div key={i} className="glass-card p-5">
                         <div className="flex items-center gap-2 mb-3"><span className="font-mono text-cyan-400 text-xs font-bold">{c.caseId}</span><span className={`text-[8px] font-bold uppercase px-2 py-0.5 rounded-full ${statusBadge(c.status)}`}>{c.status}</span></div>
                         <div className="grid grid-cols-3 gap-2 mb-2">{[ImageIcon, Video, FileIcon].map((Ic, j) => (<div key={j} className="aspect-square rounded-lg bg-black/20 border border-white/5 flex items-center justify-center hover:border-emerald-400/20 cursor-pointer transition-all"><Ic size={18} className={j === 0 ? 'text-cyan-400' : j === 1 ? 'text-purple-400' : 'text-amber-400'} /></div>))}</div>

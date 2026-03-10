@@ -4,9 +4,11 @@ import { createClient } from '@supabase/supabase-js'
 // These should be configured in Vercel/Render dashboard
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+const fallbackUrl = 'http://127.0.0.1:54321'
+const fallbackAnonKey = 'missing-anon-key'
 
 if (!supabaseUrl || !supabaseAnonKey) {
     console.error('❌ Supabase configuration missing! Ensure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set in environment variables.');
 }
 
-export const supabase = createClient(supabaseUrl || '', supabaseAnonKey || '')
+export const supabase = createClient(supabaseUrl || fallbackUrl, supabaseAnonKey || fallbackAnonKey)
