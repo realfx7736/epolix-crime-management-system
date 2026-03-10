@@ -1,11 +1,12 @@
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5001/api').replace(/\/+$/, '');
 
 const getHeaders = () => {
     const token = localStorage.getItem('token');
-    return {
+    const headers = {
         'Content-Type': 'application/json',
-        'Authorization': token ? `Bearer ${token}` : ''
     };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    return headers;
 };
 
 export const api = {
@@ -54,14 +55,20 @@ export const api = {
 };
 
 async function handleResponse(response) {
-    const data = await response.json();
+    let data = null;
+    try {
+        data = await response.json();
+    } catch {
+        data = null;
+    }
+
     if (!response.ok) {
         // If unauthorized/expired, we might want to trigger a logout
         if (response.status === 401) {
             localStorage.clear();
             window.location.href = '/login?session=expired';
         }
-        throw new Error(data.message || 'API request failed');
+        throw new Error(data?.message || data?.error || 'API request failed');
     }
     return data;
 }

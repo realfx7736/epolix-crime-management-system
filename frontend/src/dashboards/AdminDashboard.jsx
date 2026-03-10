@@ -109,10 +109,10 @@ const AdminDashboard = () => {
 
             // Fetch Real Users & Officers
             const usersRes = await api.get('/admin/users');
-            if (usersRes.success) setDbUsers(usersRes.data);
+            if (usersRes.success) setDbUsers(Array.isArray(usersRes.data) ? usersRes.data : []);
 
             const officersRes = await api.get('/admin/officers');
-            if (officersRes.success) setDbOfficers(officersRes.data);
+            if (officersRes.success) setDbOfficers(Array.isArray(officersRes.data) ? officersRes.data : []);
 
         } catch (err) {
             console.error("Backend Refresh Error", err);
@@ -158,7 +158,10 @@ const AdminDashboard = () => {
 
     const handleToggleUserStatus = async (user) => {
         try {
-            const action = user.is_active ? 'deactivate' : 'activate';
+            const currentlyActive = user.is_active !== undefined
+                ? user.is_active
+                : (user.status || '').toLowerCase() === 'active';
+            const action = currentlyActive ? 'deactivate' : 'activate';
             const res = await api.patch(`/admin/users/${user.id}/${action}`);
             if (res.success) {
                 fetchBackendData();
@@ -185,6 +188,16 @@ const AdminDashboard = () => {
 
     const unread = notifs.filter(n => n.unread).length;
     const displayUsers = dbUsers.length > 0 ? dbUsers : mockUsers;
+    const displayOfficers = dbOfficers.length > 0
+        ? dbOfficers.map((o) => ({
+            id: o.badge_number || o.department_id || o.id,
+            name: o.full_name || o.name || 'N/A',
+            division: o.station || o.district || o.division || 'General',
+            activeCases: o.active_cases ?? o.activeCases ?? 0,
+            status: o.is_active === false ? 'Inactive' : (o.status || 'On Duty'),
+            rating: o.rating ?? '-'
+        }))
+        : mockOfficers;
     const filteredUsers = displayUsers.filter(u => {
         const role = u.role || 'Citizen';
         if (userFilter !== "all" && role.toLowerCase() !== userFilter) return false;
@@ -199,7 +212,7 @@ const AdminDashboard = () => {
         { id: "overview", l: "System Overview", ic: <LayoutDashboard size={16} /> },
         { id: "analytics", l: "Crime Analytics", ic: <BarChart3 size={16} /> },
         { t: "label", l: "MANAGEMENT" },
-        { id: "users", l: "User Management", ic: <Users size={16} />, b: mockUsers.length },
+        { id: "users", l: "User Management", ic: <Users size={16} />, b: displayUsers.length },
         { id: "officers", l: "Officer Control", ic: <UserCheck size={16} /> },
         { id: "complaints", l: "All Complaints", ic: <AlertCircle size={16} />, b: realCases.length || 0 },
         { id: "evidence", l: "Evidence Database", ic: <Camera size={16} /> },
@@ -314,15 +327,15 @@ const AdminDashboard = () => {
                     <thead><tr>{["ID", "Name", "Role", "Email", "Status", "Joined", "Actions"].map(h => <th key={h}>{h}</th>)}</tr></thead>
                     <tbody>{filteredUsers.map((u, i) => (
                         <tr key={i} className="cursor-pointer">
-                            <td className="font-mono text-cyan-400 text-xs font-semibold">{u.id}</td>
-                            <td className="text-slate-300 font-semibold">{u.name}</td>
-                            <td><span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${u.role === 'Police' ? 'bg-blue-500/15 text-blue-400 border border-blue-400/20' : u.role === 'Staff' ? 'bg-purple-500/15 text-purple-400 border border-purple-400/20' : 'bg-slate-500/15 text-slate-400 border border-slate-400/20'}`}>{u.role}</span></td>
+                            <td className="font-mono text-cyan-400 text-xs font-semibold">{u.department_id || u.badge_number || u.id}</td>
+                            <td className="text-slate-300 font-semibold">{u.full_name || u.name}</td>
+                            <td><span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${((u.role || '').toLowerCase()) === 'police' ? 'bg-blue-500/15 text-blue-400 border border-blue-400/20' : ((u.role || '').toLowerCase()) === 'staff' ? 'bg-purple-500/15 text-purple-400 border border-purple-400/20' : 'bg-slate-500/15 text-slate-400 border border-slate-400/20'}`}>{u.role}</span></td>
                             <td className="text-slate-500 text-xs">{u.email}</td>
-                            <td><span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${u.status === 'Active' ? 'bg-green-500/15 text-green-400 border border-green-400/20' : u.status === 'Suspended' ? 'bg-red-500/15 text-red-400 border border-red-400/20' : 'bg-amber-500/15 text-amber-400 border border-amber-400/20'}`}>{u.status}</span></td>
-                            <td className="text-slate-600 font-mono text-[10px]">{u.joined}</td>
+                            <td><span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${(u.is_active !== undefined ? u.is_active : (u.status || '').toLowerCase() === 'active') ? 'bg-green-500/15 text-green-400 border border-green-400/20' : 'bg-red-500/15 text-red-400 border border-red-400/20'}`}>{u.is_active !== undefined ? (u.is_active ? 'Active' : 'Suspended') : u.status}</span></td>
+                            <td className="text-slate-600 font-mono text-[10px]">{u.joined || (u.created_at ? new Date(u.created_at).toLocaleDateString() : 'N/A')}</td>
                             <td><div className="flex gap-1">
-                                <button onClick={() => handleToggleUserStatus(u)} className={`p-1.5 rounded ${u.is_active ? 'bg-amber-500/10 text-amber-500' : 'bg-green-500/10 text-green-500'} hover:bg-opacity-20`}>
-                                    {u.is_active ? <X size={12} /> : <UserCheck size={12} />}
+                                <button onClick={() => handleToggleUserStatus(u)} className={`p-1.5 rounded ${(u.is_active !== undefined ? u.is_active : (u.status || '').toLowerCase() === 'active') ? 'bg-amber-500/10 text-amber-500' : 'bg-green-500/10 text-green-500'} hover:bg-opacity-20`}>
+                                    {(u.is_active !== undefined ? u.is_active : (u.status || '').toLowerCase() === 'active') ? <X size={12} /> : <UserCheck size={12} />}
                                 </button>
                                 <button onClick={() => handleDeleteUser(u.id)} className="p-1.5 rounded bg-red-500/10 text-red-400 hover:bg-red-500 hover:text-white"><Trash2 size={12} /></button>
                             </div></td>
@@ -340,13 +353,13 @@ const AdminDashboard = () => {
             <div className="glass-card overflow-hidden">
                 <table className="ad-table">
                     <thead><tr>{["Badge", "Name", "Division", "Active Cases", "Status", "Rating", "Actions"].map(h => <th key={h}>{h}</th>)}</tr></thead>
-                    <tbody>{mockOfficers.map((o, i) => (
+                    <tbody>{displayOfficers.map((o, i) => (
                         <tr key={i}>
                             <td className="font-mono text-cyan-400 text-xs font-bold">{o.id}</td>
                             <td className="text-slate-300 font-semibold">{o.name}</td>
                             <td className="text-slate-500 text-xs">{o.division}</td>
                             <td><span className="text-sm font-bold text-white">{o.activeCases}</span></td>
-                            <td><span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${o.status === 'On Duty' ? 'bg-green-500/15 text-green-400 border border-green-400/20' : o.status === 'On Leave' ? 'bg-amber-500/15 text-amber-400 border border-amber-400/20' : 'bg-blue-500/15 text-blue-400 border border-blue-400/20'}`}>{o.status}</span></td>
+                            <td><span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${o.status === 'On Duty' ? 'bg-green-500/15 text-green-400 border border-green-400/20' : o.status === 'On Leave' || o.status === 'Inactive' ? 'bg-amber-500/15 text-amber-400 border border-amber-400/20' : 'bg-blue-500/15 text-blue-400 border border-blue-400/20'}`}>{o.status}</span></td>
                             <td className="text-amber-400 text-xs font-bold flex items-center gap-1"><Star size={11} className="fill-amber-400" /> {o.rating}</td>
                             <td><div className="flex gap-1"><button className="p-1.5 rounded bg-white/5 text-slate-500 hover:text-white text-[9px] font-bold"><Edit3 size={12} /></button><button className="p-1.5 rounded bg-cyan-500/10 text-cyan-400 text-[9px] font-bold flex items-center gap-1" onClick={() => setShowModal('assign')}><Briefcase size={11} /></button></div></td>
                         </tr>
@@ -359,7 +372,7 @@ const AdminDashboard = () => {
     R.complaints = () => (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
             <div className="flex items-center justify-between"><h2 className="text-lg font-bold flex items-center gap-2" style={{ color: '#ff3366' }}><AlertCircle size={20} /> All Complaints</h2>
-                <button onClick={fetchSupabaseData} className="ad-btn secondary text-xs flex items-center gap-1"><RefreshCw size={13} /> Refresh</button></div>
+                <button onClick={fetchBackendData} className="ad-btn secondary text-xs flex items-center gap-1"><RefreshCw size={13} /> Refresh</button></div>
             <div className="glass-card overflow-hidden">
                 <table className="ad-table">
                     <thead><tr>{["Case ID", "Description", "Category", "Status", "Reported By", "Date"].map(h => <th key={h}>{h}</th>)}</tr></thead>

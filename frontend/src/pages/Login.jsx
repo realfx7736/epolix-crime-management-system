@@ -6,23 +6,37 @@ import {
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
-const API = import.meta.env.VITE_API_URL?.replace(/\/api$/, '') || 'https://epolix-backend.onrender.com';
+const configuredApi = (import.meta.env.VITE_API_URL || 'http://localhost:5001/api').replace(/\/+$/, '');
+const API = configuredApi.endsWith('/api') ? configuredApi.slice(0, -4) : configuredApi;
+const safeJson = async (res) => {
+    try {
+        return await res.json();
+    } catch {
+        return {};
+    }
+};
 
 // ─── ID Format Validators (mirror of backend) ────────────────────────────────
 const validators = {
-    police: (v) => /^OFF-\d{3,6}$/i.test(v.trim()),
-    staff: (v) => /^STF-\d{3,6}$/i.test(v.trim()),
-    admin: (v) => /^ADM-[A-Z]{2}-\d{4}-\d{4}$/i.test(v.trim()) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()),
+    police: (v) => /^OFF-\d{3,6}$/i.test(v.trim()) || /^POLICE-\d{3,6}$/i.test(v.trim()) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()),
+    staff: (v) => /^STF-\d{3,6}$/i.test(v.trim()) || /^STAFF-\d{3,6}$/i.test(v.trim()) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()),
+    admin: (v) => /^ADM-[A-Z]{2}-\d{4}-\d{4}$/i.test(v.trim()) || /^ADMIN-\d{3,6}$/i.test(v.trim()) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()),
 };
 const idPlaceholders = {
-    police: 'OFF-001 or OFF-110',
-    staff: 'STF-001 or STF-901',
-    admin: 'ADM-KL-2026-0001 or admin@epolix.gov.in',
+    police: 'OFF-001 / POLICE-001 / officer@police.gov.in',
+    staff: 'STF-001 / STAFF-001 / staff@epolix.gov.in',
+    admin: 'ADM-KL-2026-0001 / ADMIN-001 / admin@epolix.gov.in',
 };
 const idHints = {
-    police: 'Format: OFF-XXX (e.g. OFF-110)',
-    staff: 'Format: STF-XXX (e.g. STF-901)',
-    admin: 'Format: ADM-KL-YYYY-XXXX or official email',
+    police: 'Format: OFF-XXX, POLICE-XXX, or official email',
+    staff: 'Format: STF-XXX, STAFF-XXX, or official email',
+    admin: 'Format: ADM-KL-YYYY-XXXX, ADMIN-XXX, or official email',
+};
+
+const devCredentialHints = {
+    admin: { identifier: 'admin@epolix.gov.in', password: 'admin123' },
+    police: { identifier: 'OFF-001', password: 'police123' },
+    staff: { identifier: 'STF-001', password: 'staff123' },
 };
 
 const Login = () => {
@@ -97,7 +111,7 @@ const Login = () => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ aadhaarNumber: cleaned })
                 });
-                const data = await res.json();
+                const data = await safeJson(res);
                 if (data.success) {
                     setAuthUserId(data.userId);
                     setMaskedContact(data.maskedContact || '...XXXX');
@@ -127,7 +141,7 @@ const Login = () => {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ role, identifier: identifier.trim(), password })
                 });
-                const data = await res.json();
+                const data = await safeJson(res);
                 if (data.success) {
                     setAuthUserId(data.userId);
                     setMaskedContact(data.maskedContact || '...XXXX');
@@ -135,6 +149,9 @@ const Login = () => {
                     setOtpAttempts(0);
                     setStep(3);
                 } else {
+                    if (import.meta.env.DEV) {
+                        console.error('Terminal login failed:', data);
+                    }
                     setErrorMsg(data.error || 'Authentication denied. Check your credentials.');
                 }
             } catch { setErrorMsg('Terminal offline. Contact Technical HQ.'); }
@@ -156,7 +173,7 @@ const Login = () => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ userId: authUserId, role: role === 'citizen' ? 'citizen' : role, otp: otpCode })
             });
-            const data = await res.json();
+            const data = await safeJson(res);
 
             if (data.success && data.token) {
                 localStorage.setItem('token', data.token);
@@ -165,6 +182,9 @@ const Login = () => {
                 const routeMap = { citizen: '/user', police: '/police', staff: '/staff', admin: '/admin', super_admin: '/admin' };
                 setTimeout(() => navigate(routeMap[data.user?.role] || '/'), 800);
             } else {
+                if (import.meta.env.DEV) {
+                    console.error('OTP verify failed:', data);
+                }
                 setOtpAttempts(p => p + 1);
                 setErrorMsg(data.error || 'Invalid OTP. Check the code and try again.');
             }
@@ -300,10 +320,18 @@ const Login = () => {
                                     {role !== 'citizen' && identifier && idValid === false && (
                                         <p className="text-rose-400 text-[10px] mt-1 ml-1">{idHints[role]}</p>
                                     )}
-                                    {role !== 'citizen' && identifier && idValid === true && (
-                                        <p className="text-emerald-400 text-[10px] mt-1 ml-1">✓ Valid ID format</p>
-                                    )}
+                                {role !== 'citizen' && identifier && idValid === true && (
+                                    <p className="text-emerald-400 text-[10px] mt-1 ml-1">✓ Valid ID format</p>
+                                )}
+                            </div>
+
+                            {import.meta.env.DEV && role !== 'citizen' && devCredentialHints[role] && (
+                                <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-300 text-[11px] leading-relaxed">
+                                    <div className="font-bold uppercase tracking-wide text-[10px] mb-1">Dev Login Hint</div>
+                                    <div>ID: <span className="font-mono">{devCredentialHints[role].identifier}</span></div>
+                                    <div>Password: <span className="font-mono">{devCredentialHints[role].password}</span></div>
                                 </div>
+                            )}
 
                                 {/* Password Field */}
                                 {role !== 'citizen' && (
@@ -384,6 +412,9 @@ const Login = () => {
                                     <p className="text-slate-400 text-sm">6-digit OTP sent to registered contact</p>
                                     {maskedContact && <p className="text-slate-500 text-xs mt-1 font-mono">...{maskedContact}</p>}
                                     <p className="text-slate-600 text-[10px] mt-2">Attempt {otpAttempts + 1} / 3</p>
+                                    {import.meta.env.DEV && (
+                                        <p className="text-blue-300 text-[10px] mt-1 font-mono">Dev OTP override: 123456</p>
+                                    )}
                                 </div>
 
                                 {/* OTP inputs */}

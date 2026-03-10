@@ -8,6 +8,11 @@ const authorize = (...allowedRoles) => {
             return next(ApiError.unauthorized('Authentication required.'));
         }
 
+        // Super admins inherit access to all role-gated routes.
+        if (req.user.role === 'super_admin') {
+            return next();
+        }
+
         if (!allowedRoles.includes(req.user.role)) {
             return next(ApiError.forbidden(
                 `Access denied. Required role(s): ${allowedRoles.join(', ')}. Your role: ${req.user.role}`
@@ -48,7 +53,7 @@ const selfOnly = (paramName = 'id') => {
             return next(ApiError.unauthorized('Authentication required.'));
         }
 
-        if (req.params[paramName] !== req.user.id && req.user.role !== 'admin') {
+        if (req.params[paramName] !== req.user.id && req.user.role !== 'admin' && req.user.role !== 'super_admin') {
             return next(ApiError.forbidden('You can only access your own data.'));
         }
 

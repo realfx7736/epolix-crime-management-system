@@ -11,7 +11,10 @@ import './index.css';
 // ─── JWT token validation (check expiry without library) ─────────────────────
 const isTokenExpired = (token) => {
     try {
-        const payload = JSON.parse(atob(token.split('.')[1]));
+        const payloadSegment = token.split('.')[1] || '';
+        const base64 = payloadSegment.replace(/-/g, '+').replace(/_/g, '/');
+        const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
+        const payload = JSON.parse(atob(padded));
         return payload.exp * 1000 < Date.now();
     } catch {
         return true;
@@ -153,7 +156,7 @@ const AppInner = () => {
 // ─── Root App ─────────────────────────────────────────────────────────────────
 export default function App() {
     return (
-        <BrowserRouter>
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
             <AppInner />
         </BrowserRouter>
     );

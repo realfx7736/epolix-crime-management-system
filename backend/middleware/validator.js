@@ -51,6 +51,27 @@ const otpVerifySchema = Joi.object({
     role: Joi.string().valid('citizen', 'police', 'staff', 'admin').required()
 });
 
+const citizenLoginSchema = Joi.object({
+    aadhaarNumber: Joi.string().pattern(/^\d{12}$/).required().messages({
+        'string.pattern.base': 'Aadhaar must be exactly 12 digits',
+        'any.required': 'Aadhaar number is required'
+    })
+});
+
+const terminalLoginSchema = Joi.object({
+    role: Joi.string().valid('police', 'staff', 'admin').required(),
+    identifier: Joi.string().trim().max(120).required(),
+    password: Joi.string().min(1).max(256).required()
+});
+
+const verifyOtpLoginSchema = Joi.object({
+    userId: Joi.string().trim().max(120).required(),
+    role: Joi.string().valid('citizen', 'police', 'staff', 'admin').required(),
+    otp: Joi.string().pattern(/^\d{6}$/).required().messages({
+        'string.pattern.base': 'OTP must be exactly 6 digits'
+    })
+});
+
 // ============================================================
 // Complaint Validators
 // ============================================================
@@ -167,6 +188,9 @@ module.exports = {
     registerSchema,
     loginSchema,
     otpVerifySchema,
+    citizenLoginSchema,
+    terminalLoginSchema,
+    verifyOtpLoginSchema,
     complaintSchema,
     complaintUpdateSchema,
     caseSchema,

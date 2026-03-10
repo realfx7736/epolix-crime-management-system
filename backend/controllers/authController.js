@@ -6,6 +6,9 @@ const getIp = (req) =>
     req.socket?.remoteAddress ||
     'unknown';
 
+const isProduction = process.env.NODE_ENV === 'production';
+const withSafeAuthError = (fallback, actual) => (isProduction ? fallback : actual);
+
 // ─── Citizen: Aadhaar verification → OTP ──────────────────────────────────
 const citizenLogin = async (req, res) => {
     try {
@@ -16,7 +19,10 @@ const citizenLogin = async (req, res) => {
         const result = await authService.citizenLogin(aadhaarNumber, getIp(req));
         return res.status(200).json(result);
     } catch (err) {
-        return res.status(400).json({ success: false, error: err.message });
+        return res.status(400).json({
+            success: false,
+            error: withSafeAuthError('Authentication failed. Please try again.', err.message)
+        });
     }
 };
 
@@ -30,7 +36,10 @@ const terminalLogin = async (req, res) => {
         const result = await authService.terminalLogin(role, identifier, password, getIp(req));
         return res.status(200).json(result);
     } catch (err) {
-        return res.status(400).json({ success: false, error: err.message });
+        return res.status(400).json({
+            success: false,
+            error: withSafeAuthError('Authentication failed. Please check credentials and try again.', err.message)
+        });
     }
 };
 
@@ -44,7 +53,10 @@ const verifyOTP = async (req, res) => {
         const result = await authService.verifyOTP(userId, role, otp, getIp(req));
         return res.status(200).json(result);
     } catch (err) {
-        return res.status(400).json({ success: false, error: err.message });
+        return res.status(400).json({
+            success: false,
+            error: withSafeAuthError('OTP verification failed. Please retry login.', err.message)
+        });
     }
 };
 
@@ -81,6 +93,9 @@ const registerAdmin = async (req, res) => {
 // ─── Seed Database ────────────────────────────────────────────────────────
 const seedDatabase = async (req, res) => {
     try {
+        if (isProduction) {
+            return res.status(403).json({ success: false, error: 'Seed endpoint is disabled in production.' });
+        }
         const result = await authService.seedDatabase();
         return res.status(200).json({ success: true, ...result });
     } catch (err) {

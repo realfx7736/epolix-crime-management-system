@@ -91,12 +91,12 @@ const PoliceDashboard = () => {
             // Fetch My Cases (Officers only)
             const casesRes = await api.get('/cases/my');
             if (casesRes.success) {
-                setDbCases(mapCases(casesRes.data.data));
+                setDbCases(mapCases(casesRes.data));
             }
 
             // Fetch Notifications
             const notifsRes = await api.get('/notifications');
-            if (notifsRes.success) setDbNotifications(notifsRes.data);
+            if (notifsRes.success) setDbNotifications(Array.isArray(notifsRes.data) ? notifsRes.data : []);
 
         } catch (err) {
             console.error("Police Dashboard Refresh Error", err);
@@ -143,7 +143,7 @@ const PoliceDashboard = () => {
         return () => clearInterval(iv);
     }, []);
 
-    const unreadCount = dbNotifications.filter(n => !n.is_read).length;
+    const unreadCount = dbNotifications.filter(n => n.is_read === false || n.unread).length;
     const activeCases = dbCases.length > 0 ? dbCases : mockCases;
     const filteredCases = activeCases.filter(c => {
         if (caseFilter !== "all" && c.status.toLowerCase().replace("-", "") !== caseFilter.replace("-", "")) return false;
@@ -257,7 +257,7 @@ const PoliceDashboard = () => {
                         </button>
                     </div>
                     <div className="space-y-2">
-                        {cases.filter(c => c.priority === "Critical" || c.priority === "High").slice(0, 4).map((c, i) => (
+                        {activeCases.filter(c => c.priority === "Critical" || c.priority === "High").slice(0, 4).map((c, i) => (
                             <div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-black/15 border border-white/5 hover:border-cyan-500/15 transition-all cursor-pointer"
                                 onClick={() => setSelectedCase(c)}>
                                 <div className={`w-2 h-2 rounded-full shrink-0 ${c.priority === 'Critical' ? 'bg-red-500 shadow-[0_0_8px_rgba(255,51,102,0.6)]' : 'bg-orange-500'}`} />
