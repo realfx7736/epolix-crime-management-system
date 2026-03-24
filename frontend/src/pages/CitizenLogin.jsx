@@ -8,8 +8,7 @@ import {
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-const configuredApi = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/+$/, '');
-const API = configuredApi.endsWith('/api') ? configuredApi.slice(0, -4) : configuredApi;
+const API = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/+$/, '');
 
 const safeJson = async (res) => {
     try {
@@ -85,8 +84,8 @@ const CitizenLogin = () => {
             // Mobile → dedicated OTP-only endpoint; others require password
             const isMobile = inputType === 'mobile';
             const endpoint = isMobile
-                ? `${API}/api/auth/send-otp`
-                : `${API}/api/auth/citizen/login`;
+                ? `${API}/auth/send-otp`
+                : `${API}/auth/citizen/login`;
             const payload = isMobile
                 ? { mobile_number: identifier.trim().replace(/\s|-/g, '') }
                 : { identifier, password };
@@ -128,8 +127,8 @@ const CitizenLogin = () => {
             // Determine which endpoint to call based on login method
             const isMobile = inputType === 'mobile';
             const endpoint = isMobile
-                ? `${API}/api/auth/verify-otp`     // Mobile OTP via /send-otp flow
-                : `${API}/api/auth/citizen/verify-otp`; // Email/CitizenID flow
+                ? `${API}/auth/verify-otp`     // Mobile OTP via /send-otp flow
+                : `${API}/auth/citizen/verify-otp`; // Email/CitizenID flow
 
             const payload = isMobile
                 ? { mobile_number: identifier.trim().replace(/\s|-/g, ''), otp: otpCode }

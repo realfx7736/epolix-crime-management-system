@@ -7,8 +7,7 @@ import {
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-const configuredApi = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/+$/, '');
-const API = configuredApi.endsWith('/api') ? configuredApi.slice(0, -4) : configuredApi;
+const API = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/+$/, '');
 const safeJson = async (res) => {
     try {
         return await res.json();
@@ -112,12 +111,12 @@ const Login = () => {
 
             setLoading(true);
             try {
-                let endpoint = `${API}/api/auth/citizen/login`;
+                let endpoint = `${API}/auth/citizen/login`;
                 let payload = { identifier: identifier.trim(), password };
 
                 // Route direct mobile logins securely to New Auth Service via Twilio API
                 if (isMobile && !isPasswordRequired) {
-                    endpoint = `${API}/api/auth/send-otp`;
+                    endpoint = `${API}/auth/send-otp`;
                     payload = { mobile_number: identifier.trim().replace(/\s|-/g, '') };
                 }
 
@@ -157,7 +156,7 @@ const Login = () => {
 
             setLoading(true);
             try {
-                const res = await fetch(`${API}/api/auth/terminal/login`, {
+                const res = await fetch(`${API}/auth/terminal/login`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ role, identifier: identifier.trim(), password })
@@ -185,16 +184,16 @@ const Login = () => {
         if (otpCode.length !== 6) { setErrorMsg('Enter all 6 digits of your OTP.'); return; }
         if (otpAttempts >= 5) { setErrorMsg('Too many OTP attempts. Please start the login process again.'); return; }
 
-        let endpoint = `${API}/api/auth/terminal/verify-otp`;
+        let endpoint = `${API}/auth/terminal/verify-otp`;
         let payload = { userId: authUserId, role, otp: otpCode };
 
         if (role === 'citizen') {
             const isMobile = /^\d{10}$/.test(identifier.replace(/\s|-/g, ''));
             if (isMobile) {
-                endpoint = `${API}/api/auth/verify-otp`;
+                endpoint = `${API}/auth/verify-otp`;
                 payload = { mobile_number: identifier.replace(/\s|-/g, ''), otp: otpCode };
             } else {
-                endpoint = `${API}/api/auth/citizen/verify-otp`;
+                endpoint = `${API}/auth/citizen/verify-otp`;
                 payload = { userId: authUserId, role: 'citizen', otp: otpCode };
             }
         }
@@ -253,16 +252,16 @@ const Login = () => {
         setDevOtp('');
         setLoading(true);
         try {
-            let endpoint = `${API}/api/auth/terminal/login`;
+            let endpoint = `${API}/auth/terminal/login`;
             let payload = { role, identifier, password };
 
             if (role === 'citizen') {
                 const isMobile = /^\d{10}$/.test(identifier.replace(/\s|-/g, ''));
                 if (isMobile) {
-                    endpoint = `${API}/api/auth/send-otp`;
+                    endpoint = `${API}/auth/send-otp`;
                     payload = { mobile_number: identifier.replace(/\s|-/g, '') };
                 } else {
-                    endpoint = `${API}/api/auth/citizen/login`;
+                    endpoint = `${API}/auth/citizen/login`;
                     payload = { identifier, password };
                 }
             }

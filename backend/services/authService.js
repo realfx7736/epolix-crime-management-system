@@ -716,24 +716,34 @@ const sendLoginOTP = async (mobileNumber, ipAddress) => {
     const otpHash = await bcrypt.hash(otp, 10);
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
-    // 4. Store OTP
+    // 4. Store OTP — delete existing first, then insert fresh (avoids upsert conflict issues)
     let storedLocally = false;
     try {
-        const { error: otpErr } = await supabase.from('otp_tokens').upsert([{
+        // Delete any existing OTP for this user+role before inserting a new one
+        await supabase.from('otp_tokens')
+            .delete()
+            .eq('user_id', user.id)
+            .eq('purpose', 'login');
+
+        const { error: otpErr } = await supabase.from('otp_tokens').insert([{
             user_id: user.id,
-            mobile_number: mobile,
-            role: 'citizen',
-            otp_hash: otpHash,
+            identifier: mobile,
+            otp_code: otp,
+            purpose: 'login',
+            is_used: false,
             expires_at: expiresAt,
             created_at: new Date().toISOString()
-        }], { onConflict: 'user_id,role' });
+        }]);
 
-        if (otpErr && isLocalAuthEnabled()) {
-            upsertLocalOtp(user, 'citizen', otpHash, expiresAt);
-            storedLocally = true;
-            console.log(`[DEV OTP] Mobile: ${mobile} | Code: ${otp}`);
-        } else if (otpErr) {
-            throw new Error('Failed to issue OTP tokens.');
+        if (otpErr) {
+            console.warn('[sendLoginOTP] Supabase OTP store error:', otpErr.message);
+            if (isLocalAuthEnabled()) {
+                upsertLocalOtp(user, 'citizen', otpHash, expiresAt);
+                storedLocally = true;
+                console.log(`[DEV OTP] Mobile: ${mobile} | Code: ${otp}`);
+            } else {
+                throw new Error('Failed to issue OTP. Please try again.');
+            }
         }
     } catch (storeErr) {
         if (isLocalAuthEnabled()) {
@@ -846,13 +856,17 @@ const handleSuccessfulCitizenMatch = async (matchedUser, ipAddress) => {
         upsertLocalOtp(matchedUser, 'citizen', otpHash, expiresAt);
         console.log(`[DEV] Citizen OTP for ${matchedUser.full_name}: ${otp}`);
     } else {
-        const { error: otpErr } = await supabase.from('otp_tokens').upsert([{
+        // Delete existing OTP then insert fresh
+        await supabase.from('otp_tokens').delete().eq('user_id', matchedUser.id).eq('purpose', 'login');
+        const { error: otpErr } = await supabase.from('otp_tokens').insert([{
             user_id: matchedUser.id,
-            role: 'citizen',
-            otp_hash: otpHash,
+            identifier: matchedUser.phone || matchedUser.email || matchedUser.citizen_id,
+            otp_code: otp,
+            purpose: 'login',
+            is_used: false,
             expires_at: expiresAt,
             created_at: new Date().toISOString()
-        }], { onConflict: 'user_id,role' });
+        }]);
 
         if (otpErr) {
             if (isLocalAuthEnabled()) {
@@ -910,13 +924,17 @@ const sendAadhaarOTP = async (userId, aadhaarNumber) => {
     if (String(userId).includes('local') && isLocalAuthEnabled()) {
         upsertLocalOtp({ id: userId }, 'kyc', otpHash, expiresAt);
     } else {
-        await supabase.from('otp_tokens').upsert([{
+        // Delete existing KYC OTP then insert fresh
+        await supabase.from('otp_tokens').delete().eq('user_id', userId).eq('purpose', 'register');
+        await supabase.from('otp_tokens').insert([{
             user_id: userId,
-            role: 'kyc',
-            otp_hash: otpHash,
+            identifier: userId,
+            otp_code: otp,
+            purpose: 'register',
+            is_used: false,
             expires_at: expiresAt,
             created_at: new Date().toISOString()
-        }], { onConflict: 'user_id,role' });
+        }]);
     }
 
     return {
@@ -1060,13 +1078,17 @@ const terminalLogin = async (role, identifier, password, ipAddress) => {
     if (usingLocalAuth) {
         upsertLocalOtp(user, role, otpHash, expiresAt);
     } else {
-        const { error: otpError } = await supabase.from('otp_tokens').upsert([{
+        // Delete existing OTP for this user+role then insert fresh
+        await supabase.from('otp_tokens').delete().eq('user_id', user.id).eq('purpose', 'login');
+        const { error: otpError } = await supabase.from('otp_tokens').insert([{
             user_id: user.id,
-            role,
-            otp_hash: otpHash,
+            identifier: user.email || user.department_id || user.phone || String(user.id),
+            otp_code: otp,
+            purpose: 'login',
+            is_used: false,
             expires_at: expiresAt,
             created_at: new Date().toISOString()
-        }], { onConflict: 'user_id,role' });
+        }]);
 
         if (otpError) {
             if (isLocalAuthEnabled() && isSupabaseUnavailable(otpError)) {
@@ -1100,82 +1122,69 @@ const verifyOTP = async (userId, role, otpInput, ipAddress) => {
         throw new Error('Missing required fields: userId, role, otp.');
     }
 
-    let source = 'supabase';
-    const { data: dbOtpRecord, error } = await supabase
-        .from('otp_tokens')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('role', role)
-        .single();
+    const isMasterOtp = isMasterOtpEnabled() && otpInput === process.env.MASTER_OTP;
 
-    let otpRecord = dbOtpRecord;
-    if ((!otpRecord || error) && isLocalAuthEnabled()) {
-        const localOtpRecord = getLocalOtp(userId, role);
-        if (localOtpRecord) {
-            otpRecord = localOtpRecord;
-            source = 'local';
+    let source = 'supabase';
+    let otpRecord = null;
+
+    // --- Try Supabase first: match by user_id + purpose='login' ---
+    try {
+        const { data: dbOtpRecord, error } = await supabase
+            .from('otp_tokens')
+            .select('*')
+            .eq('user_id', userId)
+            .eq('purpose', 'login')
+            .eq('is_used', false)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+
+        if (dbOtpRecord && !error) {
+            otpRecord = dbOtpRecord;
+        } else if (error && isLocalAuthEnabled()) {
+            const localRecord = getLocalOtp(userId, role);
+            if (localRecord) { otpRecord = localRecord; source = 'local'; }
+        }
+    } catch (err) {
+        if (isLocalAuthEnabled()) {
+            const localRecord = getLocalOtp(userId, role);
+            if (localRecord) { otpRecord = localRecord; source = 'local'; }
         }
     }
 
     if (!otpRecord) {
-        if (isLocalAuthEnabled()) {
-            const localUser = findLocalUserById(userId, role);
-            if (localUser) {
-                throw new Error('OTP not found. Please request a new one.');
-            }
+        if (isMasterOtp) {
+            // Master OTP bypass — proceed without a stored record (dev/testing only)
+            console.warn('[verifyOTP] Master OTP used — bypassing stored record check.');
+        } else {
+            throw new Error('OTP not found. Please request a new one.');
         }
-        if (isLocalAuthEnabled() && isSupabaseUnavailable(error)) {
-            throw new Error('OTP store unavailable. Please retry login or configure Supabase.');
-        }
-        throw new Error('OTP not found. Please request a new one.');
     }
 
-    if (new Date(otpRecord.expires_at) < new Date()) {
+    if (otpRecord) {
+        // Expiry check
+        if (new Date(otpRecord.expires_at) < new Date()) {
+            if (source === 'local') clearLocalOtp(userId, role);
+            else await supabase.from('otp_tokens').delete().eq('id', otpRecord.id);
+            throw new Error('OTP has expired. Please login again to receive a new one.');
+        }
+
+        // Validate OTP — compare plain text otp_code (new schema) with fallback to bcrypt hash
+        const plainMatch = otpRecord.otp_code && otpRecord.otp_code === otpInput;
+        const hashMatch = otpRecord.otp_hash && await bcrypt.compare(otpInput, otpRecord.otp_hash).catch(() => false);
+        const isValidOtp = isMasterOtp || plainMatch || hashMatch;
+
+        if (!isValidOtp) {
+            await logLoginActivity(userId, role, 'otp_verify', false, ipAddress, 'Wrong OTP');
+            throw new Error('Invalid OTP. Please check and try again.');
+        }
+
+        // Mark as used / delete
         if (source === 'local') {
             clearLocalOtp(userId, role);
         } else {
-            await supabase.from('otp_tokens').delete().eq('user_id', userId).eq('role', role);
+            await supabase.from('otp_tokens').update({ is_used: true }).eq('id', otpRecord.id);
         }
-        throw new Error('OTP has expired. Please login again to receive a new OTP.');
-    }
-
-    if ((otpRecord.attempts || 0) >= MAX_OTP_ATTEMPTS) {
-        if (source === 'local') {
-            clearLocalOtp(userId, role);
-        } else {
-            await supabase.from('otp_tokens').delete().eq('user_id', userId).eq('role', role);
-        }
-        throw new Error(`Maximum OTP attempts (${MAX_OTP_ATTEMPTS}) exceeded. Please login again.`);
-    }
-
-    const nextOtpAttempts = (otpRecord.attempts || 0) + 1;
-    if (source === 'local') {
-        otpRecord.attempts = nextOtpAttempts;
-        localOtpStore.set(getLocalOtpKey(userId, role), otpRecord);
-    } else {
-        // attempts tracking removed as column does not exist
-    }
-
-    const isMasterOtp = isMasterOtpEnabled() && otpInput === process.env.MASTER_OTP;
-    const isValidOtp = isMasterOtp || await bcrypt.compare(otpInput, otpRecord.otp_hash);
-
-    if (!isValidOtp) {
-        const remaining = Math.max(0, MAX_OTP_ATTEMPTS - nextOtpAttempts);
-        if (nextOtpAttempts >= MAX_OTP_ATTEMPTS) {
-            if (source === 'local') {
-                clearLocalOtp(userId, role);
-            } else {
-                await supabase.from('otp_tokens').delete().eq('user_id', userId).eq('role', role);
-            }
-        }
-        await logLoginActivity(userId, role, 'otp_verify', false, ipAddress, 'Wrong OTP');
-        throw new Error(`Invalid OTP. ${remaining} attempt(s) remaining.`);
-    }
-
-    if (source === 'local') {
-        clearLocalOtp(userId, role);
-    } else {
-        await supabase.from('otp_tokens').delete().eq('user_id', userId).eq('role', role);
     }
 
     const resolved = await getUserByRoleAndId(role, userId);
