@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
+const env = require('../config/env');
 const { supabase } = require('../config/supabase');
 const { encrypt, decrypt } = require('../utils/crypto');
 const { validateAadhaar, maskAadhaar } = require('../utils/aadhaar_utils');
@@ -104,13 +105,13 @@ const generateToken = (userId, role, extra = {}) => {
         ...(extra.name && { name: extra.name }),
         iat: Math.floor(Date.now() / 1000),
     };
-    return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRY });
+    return jwt.sign(payload, env.JWT_SECRET, { expiresIn: JWT_EXPIRY });
 };
 
 const generateRefreshToken = (userId, role) => {
     return jwt.sign(
         { userId, role, type: 'refresh', iat: Math.floor(Date.now() / 1000) },
-        process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
+        env.JWT_REFRESH_SECRET || env.JWT_SECRET,
         { expiresIn: JWT_REFRESH_EXPIRY }
     );
 };
@@ -1633,7 +1634,7 @@ const refreshAccessToken = async (refreshTokenStr) => {
     try {
         decoded = jwt.verify(
             refreshTokenStr,
-            process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET
+            env.JWT_REFRESH_SECRET || env.JWT_SECRET
         );
     } catch (err) {
         if (err.name === 'TokenExpiredError') throw new Error('Refresh token expired. Please log in again.');

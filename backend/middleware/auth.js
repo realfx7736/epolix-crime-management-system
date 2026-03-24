@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
 const ApiError = require('../utils/ApiError');
+const env = require('../config/env');
 const { supabase } = require('../config/supabase');
 
 // ─── Role-to-table mapping (Unified Users Table) ────────────────────────────
@@ -167,7 +168,7 @@ const authenticate = async (req, res, next) => {
         }
 
         const token = authHeader.split(' ')[1];
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const decoded = jwt.verify(token, env.JWT_SECRET);
 
         // For auto-onboarded local citizens (no DB record), build user from token payload
         const isLocalAutoUser = String(decoded.userId || '').startsWith('local-cit-');
@@ -240,7 +241,7 @@ const optionalAuth = async (req, res, next) => {
             return next();
         }
         const token = authHeader.split(' ')[1];
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const decoded = jwt.verify(token, env.JWT_SECRET);
         req.user = {
             id: decoded.userId,
             email: decoded.email || null,
