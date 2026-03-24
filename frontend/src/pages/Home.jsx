@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
+import api from "../utils/api";
 
 
 const CrimeSceneBackground = () => {
@@ -79,17 +80,16 @@ export default function Home() {
         e.preventDefault();
         setIsTipSending(true);
         try {
-            // Save to Supabase (using the complaints table for now as an anonymous entry)
-            const { error } = await supabase.from('complaints').insert([{
+            // Submit anonymous tip via backend API
+            const response = await api.post('/complaints', {
                 title: `Anonymous Tip: ${tipForm.category}`,
                 description: tipForm.description,
-                crime_type: tipForm.category,
+                category_name: tipForm.category,
                 location: tipForm.location || 'Unknown',
-                status: 'Pending',
                 is_anonymous: true
-            }]);
+            });
 
-            if (!error) {
+            if (response.success) {
                 setTipSuccess(true);
                 setTimeout(() => {
                     setTipSuccess(false);
@@ -108,21 +108,20 @@ export default function Home() {
         e.preventDefault();
         setIsSending(true);
         try {
-            // Save Support Message to Supabase
-            const { error } = await supabase.from('support_messages').insert([{
+            // Save Support Message via Backend API
+            const response = await api.post('/support', {
                 name: contactForm.name,
                 email: contactForm.email,
                 subject: contactForm.subject,
-                message: contactForm.message,
-                status: 'Unread'
-            }]);
+                message: contactForm.message
+            });
 
-            if (!error) {
+            if (response.success) {
                 setSentStatus('Tactical Transmission Received. Support Team has been alerted.');
                 setContactForm({ name: '', email: '', subject: '', message: '' });
                 setTimeout(() => setSentStatus(null), 5000);
             } else {
-                throw error;
+                throw new Error("Transmission failed");
             }
         } catch (err) {
             console.error("Transmission Interrupted", err);

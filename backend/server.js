@@ -32,7 +32,7 @@ app.use(helmet({
             scriptSrc: ["'self'"],
             styleSrc: ["'self'", "'unsafe-inline'"],
             imgSrc: ["'self'", "data:", "https:"],
-            connectSrc: ["'self'", "https://*.supabase.co"],
+            connectSrc: ["'self'", "https://*.supabase.co", "http://localhost:*", "ws://localhost:*"],
             fontSrc: ["'self'", "https://fonts.gstatic.com"],
             objectSrc: ["'none'"],
             upgradeInsecureRequests: [],
@@ -41,18 +41,29 @@ app.use(helmet({
     crossOriginEmbedderPolicy: false,
 }));
 
-// CORS — strict origin enforcement
+// CORS — strict origin enforcement with local dev flexibility
 const allowedOrigins = [
     process.env.FRONTEND_URL || 'http://localhost:5173',
     'http://localhost:5173',
+    'http://localhost:5174',
     'http://localhost:4173',
     'https://epolix.vercel.app',
     'https://epolix-frontend.vercel.app',
     'https://epolix-crime-management-system.vercel.app',
 ];
+
 app.use(cors({
     origin: (origin, callback) => {
-        if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+        // Allow requests with no origin (like mobile apps or curl) or allowed origins
+        if (!origin) return callback(null, true);
+
+        // In development, allow ALL localhost origins
+        if (process.env.NODE_ENV !== 'production' && origin.startsWith('http://localhost:')) {
+            return callback(null, true);
+        }
+
+        if (allowedOrigins.includes(origin)) return callback(null, true);
+
         callback(new Error(`CORS policy: origin ${origin} not allowed.`));
     },
     credentials: true,
@@ -82,6 +93,7 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/complaints', require('./routes/complaints'));
 app.use('/api/cases', require('./routes/cases'));
 app.use('/api/evidence', require('./routes/evidence'));
+app.use('/api/support', require('./routes/support'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/admin', require('./routes/admin'));
@@ -199,7 +211,7 @@ app.use(errorHandler);
 // START SERVER
 // ============================================================
 
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
     console.log('');
@@ -228,3 +240,5 @@ app.listen(PORT, () => {
 });
 
 module.exports = app;
+
+

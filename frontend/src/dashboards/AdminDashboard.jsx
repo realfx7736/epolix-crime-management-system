@@ -12,6 +12,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../supabaseClient";
 import { api } from "../utils/api";
+import { useAuth } from "../context/AuthContext";
 import "./AdminDashboard.css";
 
 const mockUsers = [
@@ -71,12 +72,15 @@ const notifs = [
 
 const AdminDashboard = () => {
     const navigate = useNavigate();
+    const auth = useAuth();
     const [tab, setTab] = useState("overview");
     const [sideOpen, setSideOpen] = useState(false);
     const [showNotif, setShowNotif] = useState(false);
     const [showModal, setShowModal] = useState(null); // 'addUser','addOfficer','assign','settings','export'
     const [userFilter, setUserFilter] = useState("all");
     const [searchQ, setSearchQ] = useState("");
+    const [isLoading, setIsLoading] = useState(true);
+    const [errorMsg, setErrorMsg] = useState("");
 
     const [realCases, setRealCases] = useState([]);
     const [realMessages, setRealMessages] = useState([]);
@@ -87,35 +91,47 @@ const AdminDashboard = () => {
     const [backendStats, setBackendStats] = useState(null);
     const [dbUsers, setDbUsers] = useState([]);
     const [dbOfficers, setDbOfficers] = useState([]);
+    const [dbEvidence, setDbEvidence] = useState([]);
+
+    // Evidence Upload States
+    const [selectedFile, setSelectedFile] = useState(null);
+    const [isUploading, setIsUploading] = useState(false);
+    const [uploadStatus, setUploadStatus] = useState({ type: '', msg: '' });
+    const [evidenceMeta, setEvidenceMeta] = useState({ case_id: '', description: '' });
 
     const fetchBackendData = async () => {
+        setIsLoading(true);
+        setErrorMsg("");
         try {
             // Fetch Dashboard Overview
-            const overview = await api.get('/dashboard/overview');
+            const overview = await api.get('/dashboard/overview').catch(err => ({ success: false, error: err }));
             if (overview.success) setBackendStats(overview.data);
 
             // Fetch Recent Activity
-            const recent = await api.get('/dashboard/recent');
-            if (recent.success) {
+            const recent = await api.get('/dashboard/recent').catch(err => ({ success: false, error: err }));
+            if (recent.success && recent.data) {
                 setRealCases(complaintMapping(recent.data.recentComplaints));
             }
 
-            // Fetch Support Messages (can still use supabase or backend if route exists)
-            const { data: messages } = await supabase
-                .from('support_messages')
-                .select('*')
-                .order('created_at', { ascending: false });
-            if (messages) setRealMessages(messages);
+            // Fetch Support Messages
+            const supportRes = await api.get('/support').catch(err => ({ success: false, error: err }));
+            if (supportRes.success) setRealMessages(supportRes.data || []);
 
             // Fetch Real Users & Officers
-            const usersRes = await api.get('/admin/users');
-            if (usersRes.success) setDbUsers(Array.isArray(usersRes.data) ? usersRes.data : []);
+            const usersRes = await api.get('/admin/users').catch(err => ({ success: false, error: err }));
+            if (usersRes.success) setDbUsers(Array.isArray(usersRes.data) ? usersRes.data : (usersRes.users || []));
 
-            const officersRes = await api.get('/admin/officers');
-            if (officersRes.success) setDbOfficers(Array.isArray(officersRes.data) ? officersRes.data : []);
+            const officersRes = await api.get('/admin/officers').catch(err => ({ success: false, error: err }));
+            if (officersRes.success) setDbOfficers(Array.isArray(officersRes.data) ? officersRes.data : (officersRes.officers || []));
+
+            const evidenceRes = await api.get('/evidence').catch(err => ({ success: false, error: err }));
+            if (evidenceRes.success) setDbEvidence(Array.isArray(evidenceRes.data) ? evidenceRes.data : []);
 
         } catch (err) {
             console.error("Backend Refresh Error", err);
+            setErrorMsg("Failed to synchronize with central server.");
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -126,10 +142,35 @@ const AdminDashboard = () => {
             complaint: c.title || c.description || 'N/A',
             description: c.description || 'N/A',
             category: c.category_name || c.crime_type || 'General',
-            status: c.status || 'Pending',
+            status: mapStatus(c.status),
             reportedBy: c.complainant_name || (c.is_anonymous ? 'Anonymous' : 'Citizen'),
             timestamp: c.created_at
         }));
+    };
+
+    const mapStatus = (s) => {
+        const normalized = (s || '').toString().toLowerCase();
+        const map = {
+            'submitted': 'Under Review',
+            'under_review': 'Under Review',
+            'verified': 'Verified',
+            'investigation': 'Investigation',
+            'resolved': 'Resolved',
+            'closed': 'Closed',
+            'rejected': 'Rejected',
+            'escalated': 'Escalated'
+        };
+        return map[normalized] || s || 'Pending';
+    };
+
+    const statusColor = (s) => {
+        const status = (s || '').toString().toLowerCase();
+        if (['pending', 'under review', 'submitted'].includes(status)) return "status-pending";
+        if (['verified', 'investigation', 'under investigation'].includes(status)) return "status-investigating";
+        if (['resolved', 'closed'].includes(status)) return "status-resolved";
+        if (['rejected'].includes(status)) return "bg-red-500/15 text-red-500 border border-red-500/20";
+        if (['escalated'].includes(status)) return "bg-amber-500/15 text-amber-500 border border-amber-500/20";
+        return "status-pending";
     };
 
     useEffect(() => {
@@ -173,16 +214,59 @@ const AdminDashboard = () => {
 
     const handleCreateUser = async (e) => {
         e.preventDefault();
-        const formData = new FormData(e.target);
-        const userData = Object.fromEntries(formData.entries());
+        const fd = new FormData(e.target);
+        const data = Object.fromEntries(fd.entries());
         try {
-            const res = await api.post('/admin/users', userData);
+            const res = await api.post('/admin/users', data);
             if (res.success) {
                 setShowModal(null);
                 fetchBackendData();
             }
+        } catch (err) { console.error(err); }
+    };
+
+    const handleFileSelect = (e) => {
+        const file = e.target.files[0];
+        if (file) setSelectedFile(file);
+    };
+
+    const handleUploadEvidence = async (e) => {
+        e.preventDefault();
+        if (!selectedFile) {
+            setUploadStatus({ type: 'error', msg: 'Please select a file first.' });
+            return;
+        }
+
+        setIsUploading(true);
+        setUploadStatus({ type: '', msg: '' });
+
+        const formData = new FormData();
+        formData.append('file', selectedFile);
+        if (evidenceMeta.case_id) formData.append('case_id', evidenceMeta.case_id);
+        if (evidenceMeta.description) formData.append('description', evidenceMeta.description);
+
+        try {
+            const res = await api.post('/evidence/upload', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            });
+
+            if (res.success) {
+                setUploadStatus({ type: 'success', msg: 'Evidence uploaded successfully!' });
+                setSelectedFile(null);
+                setEvidenceMeta({ case_id: '', description: '' });
+                fetchBackendData(); // Refresh evidence list
+                setTimeout(() => {
+                    setShowModal(null);
+                    setUploadStatus({ type: '', msg: '' });
+                }, 2000);
+            } else {
+                setUploadStatus({ type: 'error', msg: res.message || 'Upload failed.' });
+            }
         } catch (err) {
-            alert(err.message);
+            console.error("Upload Error:", err);
+            setUploadStatus({ type: 'error', msg: err?.response?.data?.message || 'Server connection error.' });
+        } finally {
+            setIsUploading(false);
         }
     };
 
@@ -381,7 +465,7 @@ const AdminDashboard = () => {
                             <td className="font-mono text-cyan-400 text-xs font-bold">{c.caseId}</td>
                             <td className="text-slate-300 text-xs max-w-[200px] truncate">{c.complaint || c.description}</td>
                             <td className="text-slate-500 text-xs">{c.category || 'General'}</td>
-                            <td><span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${c.status === 'Registered' ? 'status-pending' : c.status === 'Closed' ? 'status-resolved' : 'status-investigating'}`}>{c.status}</span></td>
+                            <td><span className={`text-[9px] font-bold uppercase px-2 py-0.5 rounded-full ${statusColor(c.status)}`}>{c.status}</span></td>
                             <td className="text-slate-400 text-xs">{c.reportedBy}</td>
                             <td className="text-slate-600 font-mono text-[10px]">{c.timestamp ? new Date(c.timestamp).toLocaleDateString() : 'N/A'}</td>
                         </tr>
@@ -412,25 +496,55 @@ const AdminDashboard = () => {
         </motion.div>
     );
 
-    R.evidence = () => (
-        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
-            <div className="flex items-center justify-between"><h2 className="text-lg font-bold flex items-center gap-2" style={{ color: '#ff3366' }}><Camera size={20} /> Evidence Database</h2>
-                <button className="ad-btn text-xs flex items-center gap-1"><Upload size={13} /> Upload</button></div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {["EPLX1709001", "EPLX1709002", "EPLX1709004"].map((id, i) => (
-                    <div key={i} className="glass-card p-5">
-                        <div className="flex items-center gap-2 mb-3"><span className="font-mono text-cyan-400 text-xs font-bold">{id}</span></div>
-                        <div className="grid grid-cols-3 gap-2">{[1, 2, 3].map(j => (
-                            <div key={j} className="aspect-square rounded-lg bg-black/20 border border-white/5 flex items-center justify-center hover:border-cyan-400/20 cursor-pointer transition-all">
-                                {j === 1 ? <ImageIcon size={18} className="text-cyan-400" /> : j === 2 ? <Video size={18} className="text-purple-400" /> : <FileIcon size={18} className="text-amber-400" />}
+    R.evidence = () => {
+        // Group evidence by Case ID
+        const grouped = dbEvidence.reduce((acc, e) => {
+            const key = e.case_id || 'GENERAL';
+            if (!acc[key]) acc[key] = [];
+            acc[key].push(e);
+            return acc;
+        }, {});
+
+        const caseIds = Object.keys(grouped).length > 0 ? Object.keys(grouped) : ["EPLX1709001", "EPLX1709002", "EPLX1709004"];
+
+        return (
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
+                <div className="flex items-center justify-between"><h2 className="text-lg font-bold flex items-center gap-2" style={{ color: '#ff3366' }}><Camera size={20} /> Evidence Database</h2>
+                    <button onClick={() => setShowModal('uploadEvidence')} className="ad-btn text-xs flex items-center gap-1"><Upload size={13} /> Upload</button></div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {caseIds.map((id, i) => {
+                        const files = grouped[id] || [];
+                        return (
+                            <div key={i} className="glass-card p-5">
+                                <div className="flex items-center gap-2 mb-3"><span className="font-mono text-cyan-400 text-xs font-bold">{id}</span></div>
+                                <div className="grid grid-cols-3 gap-2">
+                                    {files.length > 0 ? files.slice(0, 6).map((f, j) => (
+                                        <div key={j} className="aspect-square rounded-lg bg-black/20 border border-white/5 flex flex-col items-center justify-center hover:border-cyan-400/20 cursor-pointer transition-all overflow-hidden relative group">
+                                            {f.file_type === 'image' ? (
+                                                <img src={f.storage_url} alt="evidence" className="w-full h-full object-cover" />
+                                            ) : f.file_type === 'video' ? (
+                                                <Video size={18} className="text-purple-400" />
+                                            ) : (
+                                                <FileIcon size={18} className="text-amber-400" />
+                                            )}
+                                            <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                <Eye size={12} className="text-white" />
+                                            </div>
+                                        </div>
+                                    )) : [1, 2, 3].map(j => (
+                                        <div key={j} className="aspect-square rounded-lg bg-black/20 border border-white/5 flex items-center justify-center">
+                                            {j === 1 ? <ImageIcon size={18} className="text-slate-700" /> : j === 2 ? <Video size={18} className="text-slate-700" /> : <FileIcon size={18} className="text-slate-700" />}
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="text-[9px] text-slate-600 mt-2">{files.length || (2 + i)} files · Chain of custody verified</div>
                             </div>
-                        ))}</div>
-                        <div className="text-[9px] text-slate-600 mt-2">{2 + i} files · Chain of custody verified</div>
-                    </div>
-                ))}
-            </div>
-        </motion.div>
-    );
+                        );
+                    })}
+                </div>
+            </motion.div>
+        );
+    };
 
     R.stations = () => (
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-4">
@@ -468,11 +582,33 @@ const AdminDashboard = () => {
                 </div>
             ))}</div>
             <div className="glass-card p-5">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">Support Messages</h3>
-                {realMessages.length > 0 ? realMessages.slice(0, 3).map((m, i) => (
-                    <div key={i} className="p-3 rounded-lg bg-black/15 border border-white/5 mb-2">
-                        <div className="flex items-center gap-2 mb-1"><Mail size={12} className="text-red-400" /><span className="text-xs font-bold text-slate-300">{m.subject || 'Support'}</span><span className="text-[9px] text-slate-600 ml-auto">{m.name}</span></div>
-                        <p className="text-xs text-slate-500 italic">"{m.message}"</p>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-2"><Mail size={14} className="text-red-400" /> Support Messages</h3>
+                {realMessages.length > 0 ? realMessages.slice(0, 5).map((m, i) => (
+                    <div key={i} className={`p-3 rounded-lg border mb-2 transition-all ${m.status === 'unread' ? 'bg-red-500/5 border-red-400/10 shadow-[0_0_15px_rgba(255,51,102,0.05)]' : 'bg-black/15 border-white/5 opacity-60'}`}>
+                        <div className="flex items-center gap-2 mb-1">
+                            <span className={`text-xs font-bold ${m.status === 'unread' ? 'text-slate-200' : 'text-slate-500'}`}>{m.subject || 'Support'}</span>
+                            <span className="text-[9px] text-slate-600 ml-auto">{m.name}</span>
+                            {m.status === 'unread' && (
+                                <button
+                                    onClick={async (e) => {
+                                        e.stopPropagation();
+                                        try {
+                                            await api.patch(`/support/${m.id}`, { status: 'read' });
+                                            fetchBackendData();
+                                        } catch (err) { alert(err.message); }
+                                    }}
+                                    className="text-[8px] bg-red-500/20 text-red-400 px-1.5 py-0.5 rounded border border-red-400/20 hover:bg-red-500/30 transition-colors"
+                                >
+                                    Mark Read
+                                </button>
+                            )}
+                            {m.status === 'read' && <CheckCircle2 size={10} className="text-slate-600" />}
+                        </div>
+                        <p className={`text-xs ${m.status === 'unread' ? 'text-slate-400' : 'text-slate-600'} italic mb-1`}>"{m.message}"</p>
+                        <div className="flex justify-between items-center">
+                            <span className="text-[8px] text-slate-700 font-mono">{m.email}</span>
+                            <span className="text-[8px] text-slate-700 font-mono">{new Date(m.created_at).toLocaleString()}</span>
+                        </div>
                     </div>
                 )) : <p className="text-xs text-slate-600 text-center py-4">No support messages</p>}
             </div>
@@ -530,6 +666,37 @@ const AdminDashboard = () => {
 
     const renderContent = () => (R[tab] ? R[tab]() : R.overview());
 
+    if (isLoading) {
+        return (
+            <div className="min-h-screen bg-[#070b14] flex items-center justify-center">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="ad-loader-circle w-12 h-12 border-2 border-red-500/20 border-t-red-500 rounded-full animate-spin shadow-[0_0_15px_rgba(255,51,102,0.3)]" />
+                    <p className="text-slate-500 text-[10px] uppercase tracking-widest font-bold animate-pulse">Establishing Secure Uplink...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (errorMsg) {
+        return (
+            <div className="min-h-screen bg-[#070b14] flex items-center justify-center p-6">
+                <div className="glass-card p-8 max-w-md w-full text-center border-red-500/20 shadow-[0_0_30px_rgba(255,51,102,0.1)]">
+                    <div className="w-16 h-16 rounded-full bg-red-500/10 flex items-center justify-center text-red-500 mx-auto mb-6 border border-red-500/20">
+                        <AlertTriangle size={32} />
+                    </div>
+                    <h2 className="text-xl font-bold text-white mb-2">Terminal Connection Failed</h2>
+                    <p className="text-slate-400 text-sm mb-6">{errorMsg}</p>
+                    <button onClick={fetchBackendData} className="ad-btn bg-red-600 hover:bg-red-500 w-full py-3 flex items-center justify-center gap-2">
+                        <RefreshCw size={16} /> Reconnect Terminal
+                    </button>
+                    <button onClick={() => navigate('/')} className="mt-4 text-[10px] uppercase tracking-widest font-bold text-slate-600 hover:text-slate-400">
+                        Return to Public Sector
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="min-h-screen grid-bg" style={{ background: "var(--dark-bg)" }}>
             {/* SIDEBAR */}
@@ -556,7 +723,9 @@ const AdminDashboard = () => {
                         <div className="w-7 h-7 rounded-lg bg-red-500/15 flex items-center justify-center text-red-400 border border-red-400/15"><User size={13} /></div>
                         <div><div className="text-[11px] font-bold text-slate-300">{admin.fullName}</div><div className="text-[8px] text-slate-600">{admin.adminId || admin.email}</div></div>
                     </div>
-                    <button onClick={() => { localStorage.clear(); navigate("/"); }} className="ad-nav-btn text-red-400 hover:bg-red-500/10 w-full"><LogOut size={15} /> Sign Out</button>
+                    <button onClick={() => { auth.logout(); navigate("/"); }} className="ad-nav-btn text-red-400 hover:bg-red-500/10 w-full flex items-center justify-center gap-2 py-2 rounded-lg transition-all">
+                        <LogOut size={15} /> Sign Out
+                    </button>
                 </div>
             </aside>
 
@@ -628,22 +797,94 @@ const AdminDashboard = () => {
                         </motion.div>
                     </motion.div>
                 )}
-                {showModal === 'assign' && (
-                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="ad-modal-overlay" onClick={() => setShowModal(null)}>
-                        <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }} className="ad-modal" onClick={e => e.stopPropagation()}>
-                            <div className="flex items-center justify-between mb-5"><h2 className="font-bold text-white flex items-center gap-2"><Briefcase size={18} className="text-cyan-400" /> Assign Case to Officer</h2><button onClick={() => setShowModal(null)} className="text-slate-500 hover:text-white"><X size={18} /></button></div>
-                            <div className="space-y-3">
-                                <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Case ID</label><input className="ad-input font-mono" placeholder="EPLX..." /></div>
-                                <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Assign to Officer</label><select className="ad-input">{mockOfficers.filter(o => o.status !== 'On Leave').map(o => <option key={o.id}>{o.name} ({o.id}) – {o.activeCases} cases</option>)}</select></div>
-                                <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Priority</label><select className="ad-input"><option>Medium</option><option>High</option><option>Critical</option><option>Low</option></select></div>
-                                <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Notes</label><textarea rows={2} className="ad-input resize-none" placeholder="Assignment instructions..." /></div>
-                                <button className="ad-btn w-full flex items-center justify-center gap-2"><Send size={14} /> Assign Case</button>
-                            </div>
+                {
+                    showModal === 'assign' && (
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="ad-modal-overlay" onClick={() => setShowModal(null)}>
+                            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }} className="ad-modal" onClick={e => e.stopPropagation()}>
+                                <div className="flex items-center justify-between mb-5"><h2 className="font-bold text-white flex items-center gap-2"><Briefcase size={18} className="text-cyan-400" /> Assign Case to Officer</h2><button onClick={() => setShowModal(null)} className="text-slate-500 hover:text-white"><X size={18} /></button></div>
+                                <div className="space-y-3">
+                                    <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Case ID</label><input className="ad-input font-mono" placeholder="EPLX..." /></div>
+                                    <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Assign to Officer</label><select className="ad-input">{mockOfficers.filter(o => o.status !== 'On Leave').map(o => <option key={o.id}>{o.name} ({o.id}) – {o.activeCases} cases</option>)}</select></div>
+                                    <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Priority</label><select className="ad-input"><option>Medium</option><option>High</option><option>Critical</option><option>Low</option></select></div>
+                                    <div><label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Notes</label><textarea rows={2} className="ad-input resize-none" placeholder="Assignment instructions..." /></div>
+                                    <button className="ad-btn w-full flex items-center justify-center gap-2"><Send size={14} /> Assign Case</button>
+                                </div>
+                            </motion.div>
                         </motion.div>
-                    </motion.div>
-                )}
-            </AnimatePresence>
-        </div>
+                    )
+                }
+                {
+                    showModal === 'uploadEvidence' && (
+                        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="ad-modal-overlay" onClick={() => setShowModal(null)}>
+                            <motion.div initial={{ scale: 0.9 }} animate={{ scale: 1 }} exit={{ scale: 0.9 }} className="ad-modal" onClick={e => e.stopPropagation()}>
+                                <div className="flex items-center justify-between mb-5"><h2 className="font-bold text-white flex items-center gap-2"><Upload size={18} className="text-red-400" /> Upload Evidence</h2><button onClick={() => setShowModal(null)} className="text-slate-500 hover:text-white"><X size={18} /></button></div>
+
+                                {uploadStatus.msg && (
+                                    <div className={`p-3 rounded-lg mb-4 text-xs font-bold flex items-center gap-2 ${uploadStatus.type === 'success' ? 'bg-green-500/10 text-green-400 border border-green-500/10' : 'bg-red-500/10 text-red-400 border border-red-400/10'}`}>
+                                        {uploadStatus.type === 'success' ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
+                                        {uploadStatus.msg}
+                                    </div>
+                                )}
+
+                                <form onSubmit={handleUploadEvidence} className="space-y-4">
+                                    <div className="border-2 border-dashed border-red-500/15 rounded-xl p-8 text-center hover:border-red-500/30 transition-all cursor-pointer bg-black/20" onClick={() => document.getElementById('admin-evidence-input').click()}>
+                                        {selectedFile ? (
+                                            <div className="flex flex-col items-center">
+                                                <FileText size={32} className="text-red-400 mb-2" />
+                                                <p className="text-sm font-bold text-slate-200">{selectedFile.name}</p>
+                                                <p className="text-[10px] text-slate-500 mt-1">{(selectedFile.size / 1024 / 1024).toFixed(2)} MB</p>
+                                                <button type="button" onClick={(e) => { e.stopPropagation(); setSelectedFile(null); }} className="mt-3 text-[10px] text-red-400 border-b border-red-400/30 hover:border-red-400">Remove & Choose Another</button>
+                                            </div>
+                                        ) : (
+                                            <div className="flex flex-col items-center">
+                                                <Upload size={32} className="text-slate-700 mb-3" />
+                                                <p className="text-sm text-slate-400 font-bold">Select Evidence File</p>
+                                                <p className="text-[10px] text-slate-600 mt-1">Images, Videos, Documents, or Audio</p>
+                                            </div>
+                                        )}
+                                        <input id="admin-evidence-input" type="file" className="hidden" onChange={handleFileSelect} />
+                                    </div>
+
+                                    <div className="grid grid-cols-1 gap-3">
+                                        <div>
+                                            <label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Case ID (Optional)</label>
+                                            <input
+                                                value={evidenceMeta.case_id}
+                                                onChange={(e) => setEvidenceMeta({ ...evidenceMeta, case_id: e.target.value })}
+                                                className="ad-input font-mono"
+                                                placeholder="EPLX1709XXX..."
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="text-[9px] font-bold uppercase text-slate-500 mb-1 block">Description / Notes</label>
+                                            <textarea
+                                                rows={2}
+                                                value={evidenceMeta.description}
+                                                onChange={(e) => setEvidenceMeta({ ...evidenceMeta, description: e.target.value })}
+                                                className="ad-input resize-none"
+                                                placeholder="What does this evidence represent?"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <button
+                                        type="submit"
+                                        disabled={!selectedFile || isUploading}
+                                        className={`ad-btn w-full flex items-center justify-center gap-2 ${(!selectedFile || isUploading) ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
+                                    >
+                                        {isUploading ? (
+                                            <><div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Uploading...</>
+                                        ) : (
+                                            <><Send size={14} /> Submit Evidence to Database</>
+                                        )}
+                                    </button>
+                                </form>
+                            </motion.div>
+                        </motion.div>
+                    )
+                }
+            </AnimatePresence >
+        </div >
     );
 };
 

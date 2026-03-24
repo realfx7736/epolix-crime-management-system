@@ -1,7 +1,8 @@
-const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5001/api').replace(/\/+$/, '');
+const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/+$/, '');
 
 const getHeaders = () => {
-    const token = localStorage.getItem('token');
+    // Check both legacy 'token' and new 'epolix_token'
+    const token = localStorage.getItem('epolix_token') || localStorage.getItem('token');
     const headers = {
         'Content-Type': 'application/json',
     };
@@ -65,10 +66,13 @@ async function handleResponse(response) {
     if (!response.ok) {
         // If unauthorized/expired, we might want to trigger a logout
         if (response.status === 401) {
-            localStorage.clear();
-            window.location.href = '/login?session=expired';
+            // Signal a session expiry without immediate destructive redirect
+            // This is safer as AuthContext will handle the state update.
+            console.warn('[API] 401 Unauthorized detected.');
         }
         throw new Error(data?.message || data?.error || 'API request failed');
     }
     return data;
 }
+
+export default api;

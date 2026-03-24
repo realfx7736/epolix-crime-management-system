@@ -4,7 +4,7 @@ const authController = require('../controllers/authController');
 const { authenticate } = require('../middleware/auth');
 const { authorize } = require('../middleware/rbac');
 const { authLimiter, otpLimiter, adminAuthLimiter } = require('../middleware/rateLimiter');
-const { validate, citizenLoginSchema, terminalLoginSchema, verifyOtpLoginSchema } = require('../middleware/validator');
+const { validate, citizenLoginSchema, terminalLoginSchema, verifyOtpLoginSchema, aadhaarKycSchema, mobileOtpSendSchema, mobileOtpVerifySchema } = require('../middleware/validator');
 
 const terminalLoginLimiter = (req, res, next) => {
     const role = String(req.body?.role || '').toLowerCase();
@@ -25,12 +25,21 @@ router.post('/terminal/login', terminalLoginLimiter, validate(terminalLoginSchem
 // Admin-specific login (extra strict limiter)
 router.post('/admin/login', adminAuthLimiter, validate(terminalLoginSchema), authController.terminalLogin);
 
-// OTP verification (all roles)
-router.post('/verify-otp', otpLimiter, validate(verifyOtpLoginSchema), authController.verifyOTP);
+// Twilio Mobile OTP (Citizen)
+router.post('/send-otp', authLimiter, validate(mobileOtpSendSchema), authController.sendLoginOTP);
+router.post('/verify-otp', otpLimiter, validate(mobileOtpVerifySchema), authController.verifyLoginOTP);
 
-// Legacy OTP route for backward compatibility
-router.post('/citizen/verify-otp', otpLimiter, validate(verifyOtpLoginSchema), authController.verifyOTP);
+// Explicit Requested Routes
+router.post('/police-login', terminalLoginLimiter, authController.policeLoginExplicit);
+router.post('/staff-login', terminalLoginLimiter, authController.staffLoginExplicit);
+router.post('/generate-otp', authLimiter, authController.generateOtpExplicit);
+
+// Terminal OTP (Police / Staff / Admin)
 router.post('/terminal/verify-otp', otpLimiter, validate(verifyOtpLoginSchema), authController.verifyOTP);
+router.post('/citizen/verify-otp', otpLimiter, validate(verifyOtpLoginSchema), authController.verifyOTP); // Legacy
+
+// Refresh Token — renew access token silently
+router.post('/refresh-token', authController.refreshToken);
 
 // Seed endpoint (secured in production)
 router.post('/seed', authController.seedDatabase);
@@ -62,6 +71,23 @@ router.post(
     authenticate,
     authorize('super_admin'),
     authController.registerAdmin
+);
+
+// Aadhaar KYC Flow (Citizen only)
+router.post(
+    '/aadhaar/send-otp',
+    authenticate,
+    authorize('citizen'),
+    validate(aadhaarKycSchema),
+    authController.sendAadhaarOTP
+);
+
+router.post(
+    '/aadhaar/verify-otp',
+    authenticate,
+    authorize('citizen'),
+    validate(aadhaarKycSchema),
+    authController.verifyAadhaarOTP
 );
 
 module.exports = router;

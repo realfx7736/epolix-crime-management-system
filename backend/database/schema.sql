@@ -45,6 +45,7 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(255) UNIQUE,
     phone VARCHAR(15),
     aadhaar VARCHAR(12) UNIQUE,
+    citizen_id VARCHAR(50) UNIQUE,
     password_hash VARCHAR(255),
     role VARCHAR(20) NOT NULL DEFAULT 'citizen' CHECK (role IN ('citizen', 'police', 'staff', 'admin')),
     department_id VARCHAR(50) UNIQUE,
@@ -56,6 +57,12 @@ CREATE TABLE IF NOT EXISTS users (
     profile_photo_url TEXT,
     is_active BOOLEAN DEFAULT true,
     is_verified BOOLEAN DEFAULT false,
+    is_aadhaar_verified BOOLEAN DEFAULT false,
+    aadhaar_masked VARCHAR(20),
+    aadhaar_hash VARCHAR(255),
+    login_attempts INTEGER DEFAULT 0,
+    locked_until TIMESTAMPTZ,
+    is_locked BOOLEAN DEFAULT false,
     last_login TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
@@ -301,6 +308,22 @@ CREATE TABLE IF NOT EXISTS system_logs (
 CREATE INDEX IF NOT EXISTS idx_logs_user ON system_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_logs_action ON system_logs(action);
 CREATE INDEX IF NOT EXISTS idx_logs_created ON system_logs(created_at);
+
+-- ============================================================
+-- 13. SUPPORT MESSAGES
+-- ============================================================
+CREATE TABLE IF NOT EXISTS support_messages (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(150) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    subject VARCHAR(200),
+    message TEXT NOT NULL,
+    status VARCHAR(20) DEFAULT 'unread' CHECK (status IN ('unread', 'read', 'replied')),
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_support_email ON support_messages(email);
+CREATE INDEX IF NOT EXISTS idx_support_status ON support_messages(status);
 
 -- ============================================================
 -- FUNCTIONS & TRIGGERS

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import {
     Shield, PlusCircle, Search, Bell, User, PhoneCall,
     LayoutDashboard, MapPin, AlertCircle, Clock, CheckCircle2,
@@ -8,12 +9,46 @@ import {
     Fingerprint, Camera, Send, AlertTriangle, Radio,
     Building2, Navigation, ChevronRight, Star, Lock,
     Edit3, Mail, Phone, Calendar, Hash, UserCircle,
-    MessageSquare, ExternalLink, Download, Filter, RefreshCw
+    MessageSquare, ExternalLink, Download, Filter, RefreshCw,
+    ShieldAlert, CreditCard
 } from "lucide-react";
-import { useNavigate } from "react-router-dom";
-import { supabase } from "../supabaseClient";
 import { api } from "../utils/api";
+import { useAuth } from "../context/AuthContext";
 import "./CitizenDashboard.css";
+
+// ─── UTILS ──────────────────────────────────────────────────────────
+const verhoeffTable = [
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    [1, 2, 3, 4, 0, 6, 7, 8, 9, 5],
+    [2, 3, 4, 0, 1, 7, 8, 9, 5, 6],
+    [3, 4, 0, 1, 2, 8, 9, 5, 6, 7],
+    [4, 0, 1, 2, 3, 9, 5, 6, 7, 8],
+    [5, 9, 8, 7, 6, 0, 4, 3, 2, 1],
+    [6, 5, 9, 8, 7, 1, 0, 4, 3, 2],
+    [7, 6, 5, 9, 8, 2, 1, 0, 4, 3],
+    [8, 7, 6, 5, 9, 3, 2, 1, 0, 4],
+    [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+];
+const permutationTable = [
+    [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    [1, 5, 7, 6, 2, 8, 3, 0, 9, 4],
+    [5, 8, 0, 3, 7, 9, 6, 1, 4, 2],
+    [8, 9, 1, 6, 0, 4, 3, 5, 2, 7],
+    [9, 4, 5, 3, 1, 2, 6, 8, 7, 0],
+    [4, 2, 8, 6, 5, 7, 3, 9, 0, 1],
+    [2, 7, 9, 3, 8, 0, 6, 4, 1, 5],
+    [7, 0, 4, 6, 9, 1, 3, 2, 5, 8]
+];
+const invTable = [0, 4, 3, 2, 1, 5, 6, 7, 8, 9];
+
+const validateVerhoeff = (array) => {
+    let c = 0;
+    const invertedArray = array.split('').map(Number).reverse();
+    for (let i = 0; i < invertedArray.length; i++) {
+        c = verhoeffTable[c][permutationTable[i % 8][invertedArray[i]]];
+    }
+    return c === 0;
+};
 
 // ─── MOCK DATA ──────────────────────────────────────────────────────
 const crimeCategories = ["Theft", "Assault", "Fraud", "Cybercrime", "Vandalism", "Kidnapping", "Robbery", "Domestic Violence", "Drug Offense", "Other"];
@@ -65,6 +100,7 @@ const crimeStats = [
 // ─── MAIN DASHBOARD COMPONENT ──────────────────────────────────────
 const UserDashboard = () => {
     const navigate = useNavigate();
+    const auth = useAuth();
     const [activeSection, setActiveSection] = useState("dashboard");
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [showEmergency, setShowEmergency] = useState(false);
@@ -72,7 +108,17 @@ const UserDashboard = () => {
     const [showReportModal, setShowReportModal] = useState(false);
     const [showEvidenceModal, setShowEvidenceModal] = useState(false);
     const [showProfileModal, setShowProfileModal] = useState(false);
+    const [showAadhaarModal, setShowAadhaarModal] = useState(false);
     const [notifications, setNotifications] = useState(mockNotifications);
+
+    // Aadhaar KYC State
+    const [aadhaarNumber, setAadhaarNumber] = useState("");
+    const [aadhaarOtp, setAadhaarOtp] = useState(["", "", "", "", "", ""]);
+    const [aadhaarStep, setAadhaarStep] = useState(1); // 1: Aadhaar, 2: OTP
+    const [aadhaarLoading, setAadhaarLoading] = useState(false);
+    const [aadhaarError, setAadhaarError] = useState("");
+    const [isAadhaarVerified, setIsAadhaarVerified] = useState(false);
+    const aadhaarOtpRefs = useRef([]);
 
     // Case tracking
     const [trackingId, setTrackingId] = useState("");
@@ -89,29 +135,26 @@ const UserDashboard = () => {
 
     const [dbComplaints, setDbComplaints] = useState([]);
     const [liveCount, setLiveCount] = useState({ active: 127, resolved: 843, officers: 56 });
+    const [isLoading, setIsLoading] = useState(true);
+    const [errorMsg, setErrorMsg] = useState("");
 
     const fetchUserData = async () => {
+        setIsLoading(true);
+        setErrorMsg("");
         try {
             // Fetch User's Complaints
-            const res = await api.get('/complaints/my');
-            if (res.success) {
+            const res = await api.get('/complaints/my').catch(err => ({ success: false, error: err }));
+            if (res.success && res.data) {
                 setDbComplaints(Array.isArray(res.data) ? res.data : []);
-            }
-
-            // Fetch Overview for stats
-            const overview = await api.get('/dashboard/overview');
-            if (overview.success) {
-                const o = overview.data.overview || {};
-                setLiveCount({
-                    active: o.activeCases || 127,
-                    resolved: o.resolvedCases || 843,
-                    officers: 64
-                });
+                setLiveCount(prev => ({
+                    ...prev,
+                    active: Array.isArray(res.data) ? res.data.filter(c => !['resolved', 'closed', 'rejected'].includes(c.status)).length : 0
+                }));
             }
 
             // Fetch Notifications
-            const notifsRes = await api.get('/notifications');
-            if (notifsRes.success) {
+            const notifsRes = await api.get('/notifications').catch(err => ({ success: false, error: err }));
+            if (notifsRes.success && notifsRes.data) {
                 const normalized = (Array.isArray(notifsRes.data) ? notifsRes.data : []).map((n) => ({
                     ...n,
                     msg: n.msg || n.message,
@@ -122,7 +165,10 @@ const UserDashboard = () => {
             }
 
         } catch (err) {
-            console.error("User Dashboard Refresh Error", err);
+            console.warn("User Dashboard Refresh Warning:", err.message);
+            setErrorMsg("Terminal Uplink Interrupted. Please check local connectivity.");
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -131,15 +177,68 @@ const UserDashboard = () => {
         if (storedUser) {
             const u = JSON.parse(storedUser);
             setProfile({
-                name: u.fullName || "Citizen",
+                name: u.fullName || u.full_name || "Citizen",
                 email: u.email || "N/A",
                 phone: u.phone || "N/A",
                 address: u.address || "N/A",
-                aadhar: u.aadhaar || "XXXX-XXXX-XXXX"
+                aadhar: u.aadhaar_masked || u.aadhaar || "Not Linked"
             });
+            setIsAadhaarVerified(!!u.is_aadhaar_verified);
         }
         fetchUserData();
     }, []);
+
+    // ─── Aadhaar KYC Flow ──────────────────────────────────
+    const handleSendAadhaarOTP = async (e) => {
+        e.preventDefault();
+        if (!/^\d{12}$/.test(aadhaarNumber)) {
+            setAadhaarError("Please enter a valid 12-digit Aadhaar number.");
+            return;
+        }
+        if (!validateVerhoeff(aadhaarNumber)) {
+            setAadhaarError("Invalid Aadhaar checksum (Verhoeff validation failed).");
+            return;
+        }
+        setAadhaarLoading(true); setAadhaarError("");
+        try {
+            const res = await api.post('/auth/aadhaar/send-otp', { aadhaarNumber });
+            if (res.success) {
+                setAadhaarStep(2);
+            } else {
+                setAadhaarError(res.error || "Aadhaar validation failed.");
+            }
+        } catch (err) {
+            setAadhaarError("KYC service temporarily unavailable.");
+        } finally {
+            setAadhaarLoading(false);
+        }
+    };
+
+    const handleVerifyAadhaarOTP = async () => {
+        const otpCode = aadhaarOtp.join("");
+        if (otpCode.length !== 6) return;
+        setAadhaarLoading(true); setAadhaarError("");
+        try {
+            const res = await api.post('/auth/aadhaar/verify-otp', { aadhaarNumber, otp: otpCode });
+            if (res.success) {
+                setIsAadhaarVerified(true);
+                setProfile(prev => ({ ...prev, aadhar: res.aadhaar_masked }));
+                // Update local storage
+                const u = JSON.parse(localStorage.getItem('user') || '{}');
+                u.is_aadhaar_verified = true;
+                u.aadhaar_masked = res.aadhaar_masked;
+                localStorage.setItem('user', JSON.stringify(u));
+
+                setTimeout(() => setShowAadhaarModal(false), 2000);
+            } else {
+                setAadhaarError(res.error || "Invalid OTP.");
+            }
+        } catch (err) {
+            setAadhaarError("Verification failed. Please retry.");
+        } finally {
+            setAadhaarLoading(false);
+        }
+    };
 
     const handleTrackCase = async (e, caseNumber = trackingId) => {
         e?.preventDefault?.();
@@ -165,21 +264,21 @@ const UserDashboard = () => {
     const mapStatus = (s) => {
         const normalized = (s || '').toString().toLowerCase();
         const map = {
-            'open': 'Registered',
-            'assigned': 'Registered',
-            'under_investigation': 'Under Investigation',
-            'evidence_collection': 'Evidence Collected',
-            'chargesheet_filed': 'ChargeSheet Filed',
-            'closed': 'Resolved',
-            'submitted': 'Pending',
-            'under_review': 'Pending',
+            'submitted': 'Under Review',
+            'under_review': 'Under Review',
             'verified': 'Verified',
             'investigation': 'Under Investigation',
             'resolved': 'Resolved',
-            'pending': 'Pending',
-            'under investigation': 'Under Investigation'
+            'closed': 'Closed',
+            'rejected': 'Rejected',
+            'escalated': 'Escalated',
+            // Legacy/Case mappings
+            'open': 'Investigation',
+            'assigned': 'Investigation',
+            'under_investigation': 'Under Investigation',
+            'evidence_collection': 'Evidence Collection'
         };
-        return map[normalized] || s || 'Registered';
+        return map[normalized] || s || 'Pending';
     };
 
     const handleReportSubmit = async (e) => {
@@ -226,9 +325,13 @@ const UserDashboard = () => {
     ];
 
     const statusColor = (s) => {
-        if (s === "Pending") return "status-pending";
-        if (s === "Under Investigation") return "status-investigating";
-        return "status-resolved";
+        const status = (s || '').toString().toLowerCase();
+        if (['pending', 'under review', 'submitted'].includes(status)) return "status-pending";
+        if (['verified', 'under investigation', 'investigation', 'investigating'].includes(status)) return "status-investigating";
+        if (['resolved', 'closed'].includes(status)) return "status-resolved";
+        if (['rejected'].includes(status)) return "status-rejected text-red-400 border-red-400/20 bg-red-400/10";
+        if (['escalated'].includes(status)) return "status-escalated text-amber-400 border-amber-400/20 bg-amber-400/10";
+        return "status-pending";
     };
 
     const severityColor = (s) => {
@@ -247,12 +350,12 @@ const UserDashboard = () => {
         <div className="space-y-6">
             {/* Stat Widgets */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {[
-                        { label: "Active Cases", value: liveCount.active, icon: <Activity size={20} />, color: "#00d4ff", trend: "+3 today" },
-                        { label: "Cases Resolved", value: liveCount.resolved, icon: <CheckCircle2 size={20} />, color: "#00ff88", trend: "+12 this week" },
-                        { label: "Officers on Duty", value: liveCount.officers, icon: <Shield size={20} />, color: "#ffaa00", trend: "3 shifts" },
-                        { label: "My Complaints", value: dbComplaints.length > 0 ? dbComplaints.length : mockComplaints.length, icon: <FileText size={20} />, color: "#ff3366", trend: "1 pending" },
-                    ].map((stat, i) => (
+                {[
+                    { label: "Active Cases", value: liveCount.active, icon: <Activity size={20} />, color: "#00d4ff", trend: "+3 today" },
+                    { label: "Cases Resolved", value: liveCount.resolved, icon: <CheckCircle2 size={20} />, color: "#00ff88", trend: "+12 this week" },
+                    { label: "Officers on Duty", value: liveCount.officers, icon: <Shield size={20} />, color: "#ffaa00", trend: "3 shifts" },
+                    { label: "My Complaints", value: dbComplaints.length > 0 ? dbComplaints.length : mockComplaints.length, icon: <FileText size={20} />, color: "#ff3366", trend: "1 pending" },
+                ].map((stat, i) => (
                     <motion.div key={i} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}
                         className="glass-card cd-stat-widget p-5"
                     >
@@ -267,6 +370,24 @@ const UserDashboard = () => {
                     </motion.div>
                 ))}
             </div>
+
+            {/* Verification Banner */}
+            {!isAadhaarVerified && (
+                <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}
+                    className="p-5 rounded-2xl bg-gradient-to-r from-blue-600/20 to-indigo-600/20 border border-blue-400/30 flex flex-col sm:flex-row items-center gap-5 shadow-2xl backdrop-blur-md"
+                >
+                    <div className="w-12 h-12 rounded-xl bg-blue-500/20 flex items-center justify-center text-blue-400 shrink-0 border border-blue-400/20">
+                        <ShieldAlert size={24} className="animate-pulse" />
+                    </div>
+                    <div className="flex-1 text-center sm:text-left">
+                        <h4 className="font-bold text-white mb-1">Identity Verification Required</h4>
+                        <p className="text-sm text-slate-400">Complete your Aadhaar KYC to unlock full police assistance features and secure document access.</p>
+                    </div>
+                    <button onClick={() => setShowAadhaarModal(true)} className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition-all hover:scale-105 shadow-lg shadow-blue-600/30 whitespace-nowrap">
+                        Verify Identity Now
+                    </button>
+                </motion.div>
+            )}
 
             {/* Quick Summary Alert if any pending cases */}
             {pendingComplaints.length > 0 && (
@@ -545,9 +666,15 @@ const UserDashboard = () => {
                     <User size={36} />
                 </div>
                 <div>
-                    <div className="text-xl font-bold text-white">{profile.name}</div>
-                    <div className="text-sm text-slate-400">Citizen · Verified ✓</div>
+                    <div className="text-xl font-bold text-white flex items-center gap-2">
+                        {profile.name}
+                        {isAadhaarVerified ? <CheckCircle2 size={16} className="text-emerald-400" /> : <AlertTriangle size={16} className="text-amber-400" />}
+                    </div>
+                    <div className="text-sm text-slate-400">Citizen · {isAadhaarVerified ? 'Verified KYC ✓' : 'KYC Pending ⚠'}</div>
                     <div className="text-xs text-slate-500 font-mono mt-1">Aadhar: {profile.aadhar}</div>
+                    {!isAadhaarVerified && (
+                        <button onClick={() => setShowAadhaarModal(true)} className="mt-3 text-[10px] font-bold uppercase tracking-wider text-blue-400 hover:underline">Link Aadhaar →</button>
+                    )}
                 </div>
             </div>
             <div className="space-y-4">
@@ -584,6 +711,40 @@ const UserDashboard = () => {
         }
     };
 
+    if (isLoading) {
+        return (
+            <div className="min-h-screen bg-[#070b14] flex items-center justify-center">
+                <div className="flex flex-col items-center gap-4 text-center">
+                    <div className="relative">
+                        <div className="w-14 h-14 border-2 border-cyan-500/10 border-t-cyan-400 rounded-full animate-spin" />
+                        <Shield className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-cyan-400/30" size={20} />
+                    </div>
+                    <p className="text-cyan-400 text-[10px] uppercase tracking-[0.3em] font-black">Syncing Citizen Records</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (errorMsg) {
+        return (
+            <div className="min-h-screen bg-[#070b14] flex items-center justify-center p-6">
+                <div className="glass-card p-10 max-w-lg w-full text-center border-cyan-500/10 shadow-[0_0_40px_rgba(0,212,255,0.05)]">
+                    <div className="w-20 h-20 rounded-2xl bg-cyan-500/5 flex items-center justify-center text-cyan-400 mx-auto mb-8 border border-cyan-400/10">
+                        <ShieldAlert size={40} />
+                    </div>
+                    <h2 className="text-2xl font-black text-white mb-3">TERMINAL OFFLINE</h2>
+                    <p className="text-slate-400 text-sm mb-8">{errorMsg}</p>
+                    <button onClick={fetchUserData} className="w-full py-3.5 rounded-xl font-bold text-sm text-[#070b14] bg-cyan-400 hover:bg-cyan-300 shadow-[0_0_20px_rgba(0,212,255,0.3)] transition-all flex items-center justify-center gap-2">
+                        <RefreshCw size={18} /> Retry Connection
+                    </button>
+                    <button onClick={() => navigate('/')} className="mt-6 text-[10px] uppercase font-bold text-slate-600 hover:text-slate-400 tracking-widest text-center block w-full">
+                        Back to Portal
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     // ─── MAIN RENDER ──────────────────────────────────────
     return (
         <div className="min-h-screen grid-bg" style={{ background: "var(--dark-bg)" }}>
@@ -610,7 +771,7 @@ const UserDashboard = () => {
                 </nav>
 
                 <div className="p-3 border-t border-white/5">
-                    <button onClick={() => { localStorage.clear(); navigate("/"); }} className="cd-nav-item w-full text-red-400 hover:bg-red-500/10 hover:text-red-400">
+                    <button onClick={() => { auth.logout(); navigate("/"); }} className="cd-nav-item w-full text-red-400 hover:bg-red-500/10 hover:text-red-400">
                         <LogOut size={18} /> Sign Out
                     </button>
                 </div>
@@ -758,6 +919,27 @@ const UserDashboard = () => {
                     </motion.div>
                 )}
             </AnimatePresence>
+            {/* ═══ AADHAAR KYC MODAL ═══ */}
+            <AnimatePresence>
+                {showAadhaarModal && (
+                    <AadhaarModal
+                        isOpen={showAadhaarModal}
+                        onClose={() => setShowAadhaarModal(false)}
+                        step={aadhaarStep}
+                        setStep={setAadhaarStep}
+                        aadhaar={aadhaarNumber}
+                        setAadhaar={setAadhaarNumber}
+                        otp={aadhaarOtp}
+                        setOtp={setAadhaarOtp}
+                        loading={aadhaarLoading}
+                        error={aadhaarError}
+                        onSend={handleSendAadhaarOTP}
+                        onVerify={handleVerifyAadhaarOTP}
+                        isVerified={isAadhaarVerified}
+                        otpRefs={aadhaarOtpRefs}
+                    />
+                )}
+            </AnimatePresence>
 
             {/* ═══ UPLOAD EVIDENCE MODAL ═══ */}
             <AnimatePresence>
@@ -796,6 +978,131 @@ const UserDashboard = () => {
                 )}
             </AnimatePresence>
         </div>
+    );
+};
+
+// ─── AADHAAR KYC MODAL ───
+const AadhaarModal = ({ isOpen, onClose, step, setStep, aadhaar, setAadhaar, otp, setOtp, loading, error, onSend, onVerify, isVerified, otpRefs }) => {
+    if (!isOpen) return null;
+
+    const handleOtpChange = (index, value) => {
+        if (!/^\d?$/.test(value)) return;
+        const newOtp = [...otp];
+        newOtp[index] = value;
+        setOtp(newOtp);
+        if (value && index < 5) otpRefs.current[index + 1]?.focus();
+    };
+
+    const handleOtpKeyDown = (index, e) => {
+        if (e.key === 'Backspace' && !otp[index] && index > 0) otpRefs.current[index - 1]?.focus();
+    };
+
+    return (
+        <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="cd-modal-overlay" onClick={onClose} style={{ zIndex: 300 }}>
+            <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+                className="cd-modal p-0 overflow-hidden max-w-md w-full" onClick={e => e.stopPropagation()}>
+
+                <div className="h-1.5 bg-blue-600/20 w-full relative">
+                    <motion.div animate={{ width: step === 1 ? '50%' : '100%' }} className="h-full bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]" />
+                </div>
+
+                <div className="p-8">
+                    <div className="flex items-center justify-between mb-8">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-400 border border-blue-400/20">
+                                <Fingerprint size={20} />
+                            </div>
+                            <div>
+                                <h2 className="text-lg font-extrabold text-white tracking-tight">Identity Verification</h2>
+                                <p className="text-[10px] text-slate-500 uppercase tracking-widest font-bold">UIDAI Secondary Authentication</p>
+                            </div>
+                        </div>
+                        <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors"><X size={20} /></button>
+                    </div>
+
+                    {isVerified ? (
+                        <div className="text-center py-6">
+                            <motion.div initial={{ scale: 0 }} animate={{ scale: 1 }} className="w-20 h-20 rounded-full bg-emerald-500/10 border border-emerald-400/20 flex items-center justify-center mx-auto mb-4">
+                                <CheckCircle2 size={40} className="text-emerald-400" />
+                            </motion.div>
+                            <h3 className="text-xl font-bold text-white mb-2">KYC Completed!</h3>
+                            <p className="text-slate-400 text-sm">Your identity has been successfully verified with E-POLIX Central Database.</p>
+                        </div>
+                    ) : (
+                        <AnimatePresence mode="wait">
+                            {step === 1 ? (
+                                <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-6">
+                                    <div className="p-4 rounded-xl bg-blue-500/5 border border-blue-400/10 text-[11px] text-blue-400/80 leading-relaxed italic">
+                                        Note: Your Aadhaar is only used for one-time verification. E-POLIX does not store your full Aadhaar number in plain text.
+                                    </div>
+                                    <div>
+                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Aadhaar Number (12 Digits)</label>
+                                        <div className="relative group">
+                                            <input
+                                                className="cd-input pl-12 tracking-[0.3em] font-mono text-lg h-14"
+                                                placeholder="0000 0000 0000"
+                                                value={aadhaar}
+                                                maxLength={12}
+                                                onChange={e => setAadhaar(e.target.value.replace(/\D/g, ''))}
+                                            />
+                                            <CreditCard className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 group-focus-within:text-blue-400 transition-colors" size={20} />
+                                        </div>
+                                    </div>
+                                    {aadhaar.length === 12 && !validateVerhoeff(aadhaar) && (
+                                        <p className="text-rose-400 text-[10px] font-bold flex items-center gap-1.5 bg-rose-500/5 p-2 rounded-lg border border-rose-500/10">
+                                            <AlertCircle size={12} /> Aadhaar checksum mismatch. Check number.
+                                        </p>
+                                    )}
+                                    {error && <p className="text-rose-400 text-xs font-bold flex items-center gap-2"><AlertCircle size={14} /> {error}</p>}
+                                    <button onClick={onSend} disabled={loading || aadhaar.length !== 12 || !validateVerhoeff(aadhaar)}
+                                        className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-blue-600/20 active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2">
+                                        {loading ? <RefreshCw className="animate-spin" size={18} /> : <span>Request OTP <ChevronRight size={18} /></span>}
+                                    </button>
+                                </motion.div>
+                            ) : (
+                                <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-8 text-center">
+                                    <div>
+                                        <div className="text-2xl font-bold text-white mb-2 tracking-tighter">Security Check</div>
+                                        <p className="text-slate-500 text-xs leading-relaxed">
+                                            A 6-digit verification code has been sent to your <span className="text-blue-400 font-bold">UIDAI registered mobile number</span>.
+                                        </p>
+                                        <div className="mt-4 p-3 bg-blue-500/5 border border-blue-400/10 rounded-xl flex items-center justify-center gap-3">
+                                            <div className="w-2 h-2 rounded-full bg-blue-400 animate-ping" />
+                                            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Verifying Aadhaar Linkage...</span>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex justify-center gap-2">
+                                        {otp.map((d, i) => (
+                                            <input
+                                                key={i}
+                                                ref={el => otpRefs.current[i] = el}
+                                                className="w-10 h-14 bg-white/5 border border-white/10 rounded-xl text-center text-xl font-bold text-white focus:outline-none focus:border-blue-500 transition-all"
+                                                value={d}
+                                                maxLength={1}
+                                                onChange={e => handleOtpChange(i, e.target.value)}
+                                                onKeyDown={e => handleOtpKeyDown(i, e)}
+                                            />
+                                        ))}
+                                    </div>
+
+                                    {error && <p className="text-rose-400 text-xs font-bold">{error}</p>}
+
+                                    <div className="flex gap-4">
+                                        <button onClick={() => setStep(1)} className="flex-1 py-3 rounded-xl bg-white/5 text-slate-500 font-bold text-[10px] uppercase tracking-widest hover:bg-white/10 transition-all">Back</button>
+                                        <button onClick={onVerify} disabled={loading || otp.join('').length < 6}
+                                            className="flex-[2] py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold transition-all flex items-center justify-center gap-2">
+                                            {loading ? <RefreshCw className="animate-spin" size={18} /> : "Verify Identity"}
+                                        </button>
+                                    </div>
+                                    <button onClick={onSend} className="text-[10px] uppercase font-bold text-slate-500 hover:text-blue-400 transition-colors">Resend Verification Code</button>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    )}
+                </div>
+            </motion.div>
+        </motion.div>
     );
 };
 

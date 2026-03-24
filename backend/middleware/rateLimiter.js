@@ -22,8 +22,8 @@ const authLimiter = rateLimit({
 
 // ─── OTP-specific stricter limiter ────────────────────────────────────────
 const otpLimiter = rateLimit({
-    windowMs: 5 * 60 * 1000,  // 5 minutes
-    max: 5,                    // 5 OTP attempts
+    windowMs: 1 * 60 * 1000,  // 1 minute (as requested)
+    max: 3,                    // max 3 OTP attempts per minute
     standardHeaders: true,
     legacyHeaders: false,
     message: { success: false, error: 'Too many OTP attempts. Try again in 5 minutes.' },

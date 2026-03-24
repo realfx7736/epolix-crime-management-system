@@ -6,9 +6,13 @@
       "phone": "9999999999",
       "deptId": "ADMIN-001",
       "role": "admin",
-      "password": "$2b$10$fgkMKU4UXM9r8m/ershI7u58hkzM6wRD7bESdNyBCwrgsXVSwOGNe",
+      "password": "$2b$10$qP/nWoTS1ZRuUKcBueSPFuklf/1ZJCzaJ0DbAEa4pPfpJFusAg00S",
       "verified": true,
-      "_id": "37eyb4rmf"
+      "_id": "37eyb4rmf",
+      "login_attempts": 0,
+      "is_locked": false,
+      "locked_until": null,
+      "last_login": "2026-03-24T06:44:04.995Z"
     },
     {
       "name": "Inspector Vikram",
@@ -16,9 +20,13 @@
       "phone": "8888888888",
       "deptId": "POLICE-001",
       "role": "police",
-      "password": "$2b$10$fgkMKU4UXM9r8m/ershI7u/1xXlYEza498AwiFbsq/GbYxA5pA6hW",
+      "password": "$2b$10$qP/nWoTS1ZRuUKcBueSPFuklf/1ZJCzaJ0DbAEa4pPfpJFusAg00S",
       "verified": true,
-      "_id": "z6phyifpk"
+      "_id": "z6phyifpk",
+      "login_attempts": 0,
+      "is_locked": false,
+      "locked_until": null,
+      "last_login": "2026-03-23T17:23:06.578Z"
     },
     {
       "name": "Staff Rahul",
@@ -26,9 +34,29 @@
       "phone": "7777777777",
       "deptId": "STAFF-001",
       "role": "staff",
-      "password": "$2b$10$fgkMKU4UXM9r8m/ershI7up888UBur69uN6vJ5OE/P/KXq5LY2tpK",
+      "password": "$2b$10$qP/nWoTS1ZRuUKcBueSPFuklf/1ZJCzaJ0DbAEa4pPfpJFusAg00S",
       "verified": true,
-      "_id": "nwr1ftz7u"
+      "_id": "nwr1ftz7u",
+      "login_attempts": 0,
+      "is_locked": false,
+      "locked_until": null,
+      "last_login": "2026-03-23T17:23:56.127Z"
+    },
+    {
+      "name": "Citizen Rahul Kumar",
+      "email": "rahul@example.com",
+      "phone": "9333333333",
+      "citizenId": "CIT-2026-0001",
+      "role": "citizen",
+      "password": "$2b$10$qP/nWoTS1ZRuUKcBueSPFuklf/1ZJCzaJ0DbAEa4pPfpJFusAg00S",
+      "verified": true,
+      "isVerified": true,
+      "is_active": true,
+      "_id": "citizen_local_1",
+      "login_attempts": 0,
+      "is_locked": false,
+      "locked_until": null,
+      "last_login": "2026-03-23T04:53:36.245Z"
     }
   ],
   "cases": [

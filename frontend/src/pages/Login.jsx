@@ -5,8 +5,9 @@ import {
     AlertCircle, ChevronRight, Eye, EyeOff, RefreshCw, CheckCircle2, XCircle
 } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useAuth } from '../context/AuthContext';
 
-const configuredApi = (import.meta.env.VITE_API_URL || 'http://localhost:5001/api').replace(/\/+$/, '');
+const configuredApi = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/+$/, '');
 const API = configuredApi.endsWith('/api') ? configuredApi.slice(0, -4) : configuredApi;
 const safeJson = async (res) => {
     try {
@@ -16,31 +17,28 @@ const safeJson = async (res) => {
     }
 };
 
-// ─── ID Format Validators (mirror of backend) ────────────────────────────────
 const validators = {
     police: (v) => /^OFF-\d{3,6}$/i.test(v.trim()) || /^POLICE-\d{3,6}$/i.test(v.trim()) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()),
     staff: (v) => /^STF-\d{3,6}$/i.test(v.trim()) || /^STAFF-\d{3,6}$/i.test(v.trim()) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()),
     admin: (v) => /^ADM-[A-Z]{2}-\d{4}-\d{4}$/i.test(v.trim()) || /^ADMIN-\d{3,6}$/i.test(v.trim()) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()),
+    citizen: (v) => /^[6-9]\d{9}$/.test(v.trim().replace(/\s|-/g, '')) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) || /^CIT-\d{4}-\d{4}$/i.test(v.trim()),
 };
 const idPlaceholders = {
-    police: 'OFF-001 / POLICE-001 / officer@police.gov.in',
-    staff: 'STF-001 / STAFF-001 / staff@epolix.gov.in',
-    admin: 'ADM-KL-2026-0001 / ADMIN-001 / admin@epolix.gov.in',
+    police: 'OFF-001 / police@epolix.gov.in',
+    staff: 'STF-001 / Mobile Number / staff@epolix.gov.in',
+    admin: 'ADM-KL-2026-0001 / admin@epolix.gov.in',
 };
 const idHints = {
-    police: 'Format: OFF-XXX, POLICE-XXX, or official email',
-    staff: 'Format: STF-XXX, STAFF-XXX, or official email',
-    admin: 'Format: ADM-KL-YYYY-XXXX, ADMIN-XXX, or official email',
+    police: 'Format: OFF-XXX or email',
+    staff: 'Format: STF-XXX, 10-digit mobile, or email',
+    admin: 'Format: ADM-KL-YYYY-XXXX or email',
 };
 
-const devCredentialHints = {
-    admin: { identifier: 'admin@epolix.gov.in', password: 'admin123' },
-    police: { identifier: 'OFF-001', password: 'police123' },
-    staff: { identifier: 'STF-001', password: 'staff123' },
-};
+const devCredentialHints = {}; // Removed for security
 
 const Login = () => {
     const navigate = useNavigate();
+    const auth = useAuth();
     const [searchParams] = useSearchParams();
     const [step, setStep] = useState(1);
     const [role, setRole] = useState('citizen');
@@ -55,10 +53,18 @@ const Login = () => {
     const [otpAttempts, setOtpAttempts] = useState(0);
     const [authUserId, setAuthUserId] = useState('');
     const [maskedContact, setMaskedContact] = useState('');
-    const [captcha, setCaptcha] = useState({ q: '', a: 0 });
-    const [userCaptcha, setUserCaptcha] = useState('');
     const [idValid, setIdValid] = useState(null); // null | true | false
+    const [devOtp, setDevOtp] = useState(''); // DEV only: OTP returned by backend
+    const [pendingRedirect, setPendingRedirect] = useState(null); // role-based route to redirect after login
     const otpRefs = useRef([]);
+
+    // Simplified redirect logic — if already authenticated, go to dashboard
+    useEffect(() => {
+        if (auth.isAuthenticated && !pendingRedirect) {
+            const from = searchParams.get('from');
+            if (from) navigate(from, { replace: true });
+        }
+    }, [auth.isAuthenticated, navigate, searchParams, pendingRedirect]);
 
     // Session expired notice
     const sessionExpired = searchParams.get('session') === 'expired';
@@ -70,19 +76,16 @@ const Login = () => {
         return () => clearInterval(interval);
     }, [otpTimer]);
 
-    // CAPTCHA for admin
     useEffect(() => {
-        if (role === 'admin' && step === 2) {
-            const n1 = Math.floor(Math.random() * 9) + 1;
-            const n2 = Math.floor(Math.random() * 9) + 1;
-            setCaptcha({ q: `${n1} + ${n2}`, a: n1 + n2 });
-            setUserCaptcha('');
+        if (step === 3 && otpRefs.current[0]) {
+            setTimeout(() => {
+                if (otpRefs.current[0]) otpRefs.current[0].focus();
+            }, 100);
         }
-    }, [role, step]);
+    }, [step, role]);
 
-    // Validate ID format in real-time
     useEffect(() => {
-        if (!identifier || role === 'citizen') { setIdValid(null); return; }
+        if (!identifier) { setIdValid(null); return; }
         setIdValid(validators[role]?.(identifier) ?? null);
     }, [identifier, role]);
 
@@ -99,27 +102,40 @@ const Login = () => {
         setErrorMsg('');
 
         if (role === 'citizen') {
-            const cleaned = identifier.replace(/\s|-/g, '');
-            if (cleaned.length !== 12 || !/^\d{12}$/.test(cleaned)) {
-                setErrorMsg('Aadhaar number must be exactly 12 digits.');
+            const isMobile = /^[6-9]\d{9}$/.test(identifier.trim().replace(/\s|-/g, ''));
+            const isPasswordRequired = !isMobile || identifier.includes('@') || identifier.toUpperCase().startsWith('CIT-');
+
+            if (isPasswordRequired && !password) {
+                setErrorMsg('Password is required for Email/Citizen ID login.');
                 return;
             }
+
             setLoading(true);
             try {
-                const res = await fetch(`${API}/api/auth/citizen/login`, {
+                let endpoint = `${API}/api/auth/citizen/login`;
+                let payload = { identifier: identifier.trim(), password };
+
+                // Route direct mobile logins securely to New Auth Service via Twilio API
+                if (isMobile && !isPasswordRequired) {
+                    endpoint = `${API}/api/auth/send-otp`;
+                    payload = { mobile_number: identifier.trim().replace(/\s|-/g, '') };
+                }
+
+                const res = await fetch(endpoint, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ aadhaarNumber: cleaned })
+                    body: JSON.stringify(payload)
                 });
                 const data = await safeJson(res);
                 if (data.success) {
                     setAuthUserId(data.userId);
-                    setMaskedContact(data.maskedContact || '...XXXX');
-                    setOtpTimer(60);
+                    setMaskedContact(data.maskedContact || 'XXXXXX');
+                    setOtpTimer(300); // 5 min expiry
                     setOtpAttempts(0);
+                    if (data.otp) setDevOtp(data.otp); // DEV: show OTP to tester
                     setStep(3);
                 } else {
-                    setErrorMsg(data.error || 'Aadhaar verification failed.');
+                    setErrorMsg(data.error || data.message || 'Identity verification failed.');
                 }
             } catch { setErrorMsg('Authentication service unavailable. Try again.'); }
             finally { setLoading(false); }
@@ -127,12 +143,17 @@ const Login = () => {
         } else {
             // Terminal login
             if (!identifier.trim()) { setErrorMsg('ID or email is required.'); return; }
-            if (!password) { setErrorMsg('Password is required.'); return; }
-            if (idValid === false) { setErrorMsg(idHints[role] || 'Invalid ID format.'); return; }
-            if (role === 'admin' && parseInt(userCaptcha) !== captcha.a) {
-                setErrorMsg('Security challenge failed. Please solve the CAPTCHA correctly.');
-                return;
+            if (role === 'staff') {
+                const isMobile = /^\d{10}$/.test(identifier.replace(/\s|-/g, ''));
+                if (!isMobile && !password) {
+                    setErrorMsg('Password is required for ID/Email login.');
+                    return;
+                }
+            } else {
+                if (!password) { setErrorMsg('Password is required.'); return; }
             }
+
+            if (idValid === false) { setErrorMsg(idHints[role] || 'Invalid ID format.'); return; }
 
             setLoading(true);
             try {
@@ -149,38 +170,68 @@ const Login = () => {
                     setOtpAttempts(0);
                     setStep(3);
                 } else {
-                    if (import.meta.env.DEV) {
-                        console.error('Terminal login failed:', data);
-                    }
                     setErrorMsg(data.error || 'Authentication denied. Check your credentials.');
                 }
-            } catch { setErrorMsg('Terminal offline. Contact Technical HQ.'); }
+            } catch {
+                setErrorMsg('Terminal offline. Contact Technical HQ.');
+            }
             finally { setLoading(false); }
         }
     };
 
     // ─── Step 3: Verify OTP ───────────────────────────────────────────────
-    const handleVerifyOtp = async () => {
-        const otpCode = otp.join('');
+    const handleVerifyOtp = async (inputCode) => {
+        const otpCode = typeof inputCode === 'string' ? inputCode : otp.join('');
         if (otpCode.length !== 6) { setErrorMsg('Enter all 6 digits of your OTP.'); return; }
-        if (otpAttempts >= 3) { setErrorMsg('Too many OTP attempts. Please start the login process again.'); return; }
+        if (otpAttempts >= 5) { setErrorMsg('Too many OTP attempts. Please start the login process again.'); return; }
+
+        let endpoint = `${API}/api/auth/terminal/verify-otp`;
+        let payload = { userId: authUserId, role, otp: otpCode };
+
+        if (role === 'citizen') {
+            const isMobile = /^\d{10}$/.test(identifier.replace(/\s|-/g, ''));
+            if (isMobile) {
+                endpoint = `${API}/api/auth/verify-otp`;
+                payload = { mobile_number: identifier.replace(/\s|-/g, ''), otp: otpCode };
+            } else {
+                endpoint = `${API}/api/auth/citizen/verify-otp`;
+                payload = { userId: authUserId, role: 'citizen', otp: otpCode };
+            }
+        }
 
         setLoading(true);
         setErrorMsg('');
         try {
-            const res = await fetch(`${API}/api/auth/verify-otp`, {
+            const res = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId: authUserId, role: role === 'citizen' ? 'citizen' : role, otp: otpCode })
+                body: JSON.stringify(payload)
             });
             const data = await safeJson(res);
 
-            if (data.success && data.token) {
-                localStorage.setItem('token', data.token);
-                localStorage.setItem('user', JSON.stringify(data.user));
-                setSuccessMsg('Access granted! Redirecting...');
+            if (data.success && (data.token || data.accessToken)) {
+                const accessToken = data.accessToken || data.token;
+                const refreshToken = data.refreshToken || null;
+                const userData = data.user || {};
+
+                // Ensure user has a role for routing
+                if (!userData.role) userData.role = role;
+
+                console.log('[Login] OTP verified. Establishing session...', {
+                    role: userData.role,
+                    userId: userData.id,
+                });
+
+                // Call auth.login() — this updates React state AND localStorage
+                // synchronously, so by the time navigation fires, ProtectedRoute
+                // will see isAuthenticated = true.
+                auth.login(accessToken, refreshToken, userData);
+
                 const routeMap = { citizen: '/user', police: '/police', staff: '/staff', admin: '/admin', super_admin: '/admin' };
-                setTimeout(() => navigate(routeMap[data.user?.role] || '/'), 800);
+                const targetRoute = searchParams.get('from') || routeMap[userData.role] || '/';
+
+                setSuccessMsg('Access granted! Redirecting...');
+                navigate(targetRoute, { replace: true });
             } else {
                 if (import.meta.env.DEV) {
                     console.error('OTP verify failed:', data);
@@ -188,7 +239,10 @@ const Login = () => {
                 setOtpAttempts(p => p + 1);
                 setErrorMsg(data.error || 'Invalid OTP. Check the code and try again.');
             }
-        } catch { setErrorMsg('Verification system offline.'); }
+        } catch (err) {
+            console.error('[Login] Verification error:', err);
+            setErrorMsg('Verification system offline.');
+        }
         finally { setLoading(false); }
     };
 
@@ -196,18 +250,34 @@ const Login = () => {
     const handleResendOtp = async () => {
         setOtp(['', '', '', '', '', '']);
         setErrorMsg('');
+        setDevOtp('');
         setLoading(true);
         try {
-            const endpoint = role === 'citizen' ? '/api/auth/citizen/login' : '/api/auth/terminal/login';
-            await fetch(`${API}${endpoint}`, {
+            let endpoint = `${API}/api/auth/terminal/login`;
+            let payload = { role, identifier, password };
+
+            if (role === 'citizen') {
+                const isMobile = /^\d{10}$/.test(identifier.replace(/\s|-/g, ''));
+                if (isMobile) {
+                    endpoint = `${API}/api/auth/send-otp`;
+                    payload = { mobile_number: identifier.replace(/\s|-/g, '') };
+                } else {
+                    endpoint = `${API}/api/auth/citizen/login`;
+                    payload = { identifier, password };
+                }
+            }
+
+            const res = await fetch(endpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(role === 'citizen'
-                    ? { aadhaarNumber: identifier.replace(/\s|-/g, '') }
-                    : { role, identifier, password })
+                body: JSON.stringify(payload)
             });
-            setOtpTimer(60);
+            const data = await safeJson(res);
+            if (data.otp) setDevOtp(data.otp);
+            setOtpTimer(role === 'citizen' ? 300 : 60);
             setOtpAttempts(0);
+            setSuccessMsg('OTP resent successfully!');
+            setTimeout(() => setSuccessMsg(''), 2500);
         } catch { setErrorMsg('Could not resend OTP.'); }
         finally { setLoading(false); }
     };
@@ -218,10 +288,28 @@ const Login = () => {
         const newOtp = [...otp];
         newOtp[index] = value;
         setOtp(newOtp);
-        if (value && index < 5) otpRefs.current[index + 1]?.focus();
+
+        // Auto focus next
+        if (value && index < 5) {
+            otpRefs.current[index + 1]?.focus();
+        }
+
+        // Auto submit if 6 digits
+        if (newOtp.every(d => d !== '') && newOtp.length === 6) {
+            // Give a tiny moment for the last digit to render before submitting
+            setTimeout(() => {
+                handleVerifyOtp(newOtp.join(''));
+            }, 50);
+        }
     };
+
     const handleOtpKeyDown = (index, e) => {
-        if (e.key === 'Backspace' && !otp[index] && index > 0) otpRefs.current[index - 1]?.focus();
+        if (e.key === 'Backspace' && !otp[index] && index > 0) {
+            otpRefs.current[index - 1]?.focus();
+        }
+        if (e.key === 'Enter' && otp.every(d => d !== '')) {
+            handleVerifyOtp();
+        }
     };
 
     const progressWidth = step === 1 ? '33%' : step === 2 ? '66%' : '100%';
@@ -292,22 +380,18 @@ const Login = () => {
                                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">
                                         {role === 'citizen' ? 'Aadhaar Number (12 digits)' : role === 'police' ? 'Police ID' : role === 'staff' ? 'Staff ID' : 'Admin ID or Email'}
                                     </label>
-                                    <div className="relative">
-                                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500">
+                                    <div className="relative group">
+                                        <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors ${identifier ? 'text-blue-400' : 'text-slate-500 group-focus-within:text-blue-400'}`}>
                                             {role === 'citizen' ? <Fingerprint size={18} /> : <User size={18} />}
                                         </div>
                                         <input
                                             type="text"
                                             autoComplete="off"
-                                            className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-11 pr-11 text-white focus:outline-none focus:border-blue-500 transition-all placeholder:text-slate-700 font-mono text-sm"
-                                            placeholder={role === 'citizen' ? '123456789012' : idPlaceholders[role]}
+                                            className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-11 pr-11 text-white focus:outline-none focus:border-blue-500/50 focus:ring-4 focus:ring-blue-500/5 transition-all placeholder:text-slate-700 font-mono text-sm group-hover:border-white/20"
+                                            placeholder={role === 'citizen' ? '10-digit Mobile / Email / CIT-ID' : idPlaceholders[role]}
                                             value={identifier}
-                                            maxLength={role === 'citizen' ? 12 : 60}
-                                            onChange={(e) => setIdentifier(
-                                                role === 'citizen'
-                                                    ? e.target.value.replace(/\D/g, '').slice(0, 12)
-                                                    : e.target.value
-                                            )}
+                                            maxLength={60}
+                                            onChange={(e) => setIdentifier(e.target.value)}
                                         />
                                         {/* ID validation indicator */}
                                         {role !== 'citizen' && identifier && (
@@ -320,65 +404,41 @@ const Login = () => {
                                     {role !== 'citizen' && identifier && idValid === false && (
                                         <p className="text-rose-400 text-[10px] mt-1 ml-1">{idHints[role]}</p>
                                     )}
-                                {role !== 'citizen' && identifier && idValid === true && (
-                                    <p className="text-emerald-400 text-[10px] mt-1 ml-1">✓ Valid ID format</p>
-                                )}
-                            </div>
-
-                            {import.meta.env.DEV && role !== 'citizen' && devCredentialHints[role] && (
-                                <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-300 text-[11px] leading-relaxed">
-                                    <div className="font-bold uppercase tracking-wide text-[10px] mb-1">Dev Login Hint</div>
-                                    <div>ID: <span className="font-mono">{devCredentialHints[role].identifier}</span></div>
-                                    <div>Password: <span className="font-mono">{devCredentialHints[role].password}</span></div>
+                                    {role !== 'citizen' && identifier && idValid === true && (
+                                        <p className="text-emerald-400 text-[10px] mt-1 ml-1">✓ Valid ID format</p>
+                                    )}
                                 </div>
-                            )}
 
-                                {/* Password Field */}
-                                {role !== 'citizen' && (
-                                    <div>
-                                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Password</label>
-                                        <div className="relative">
-                                            <Lock size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500" />
-                                            <input
-                                                type={showPassword ? 'text' : 'password'}
-                                                onPaste={(e) => e.preventDefault()}
-                                                onCopy={(e) => e.preventDefault()}
-                                                autoComplete="current-password"
-                                                className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-11 pr-11 text-white focus:outline-none focus:border-blue-500 transition-all text-sm"
-                                                placeholder="••••••••••••"
-                                                value={password}
-                                                onChange={(e) => setPassword(e.target.value)}
-                                                onKeyDown={(e) => e.key === 'Enter' && handleCredentialSubmit()}
-                                            />
-                                            <button type="button" onClick={() => setShowPassword(!showPassword)}
-                                                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
-                                                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                                            </button>
-                                        </div>
-                                    </div>
+                                {/* Dev hints removed */}
+
+                                {/* Password Field - Hidden for Staff Mobile Login */}
+                                {(role !== 'citizen' || (role === 'citizen' && (identifier.includes('@') || identifier.toUpperCase().includes('CIT-')))) && (
+                                    (role !== 'staff' || !/^\d{10}$/.test(identifier.replace(/\s|-/g, ''))) && (
+                                        <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">Password</label>
+                                            <div className="relative group">
+                                                <Lock size={18} className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors ${password ? 'text-blue-400' : 'text-slate-500 group-focus-within:text-blue-400'}`} />
+                                                <input
+                                                    type={showPassword ? 'text' : 'password'}
+                                                    onPaste={(e) => e.preventDefault()}
+                                                    onCopy={(e) => e.preventDefault()}
+                                                    autoComplete="current-password"
+                                                    className="w-full bg-white/5 border border-white/10 rounded-2xl py-4 pl-11 pr-11 text-white focus:outline-none focus:border-blue-500/50 focus:ring-4 focus:ring-blue-500/5 transition-all text-sm group-hover:border-white/20"
+                                                    placeholder="••••••••••••"
+                                                    value={password}
+                                                    onChange={(e) => setPassword(e.target.value)}
+                                                    onKeyDown={(e) => e.key === 'Enter' && handleCredentialSubmit()}
+                                                />
+                                                <button type="button" onClick={() => setShowPassword(!showPassword)}
+                                                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
+                                                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                                                </button>
+                                            </div>
+                                        </motion.div>
+                                    )
                                 )}
 
-                                {/* CAPTCHA for Admin */}
-                                {role === 'admin' && (
-                                    <div className="p-4 bg-rose-500/5 border border-rose-400/15 rounded-2xl flex items-center justify-between gap-4">
-                                        <div>
-                                            <div className="text-[9px] font-bold uppercase tracking-widest text-rose-400 mb-0.5">Security Challenge</div>
-                                            <div className="font-mono font-bold text-white">{captcha.q} = ?</div>
-                                        </div>
-                                        <div className="flex items-center gap-2">
-                                            <input type="number" className="w-16 bg-black/30 border border-white/10 rounded-xl py-2 text-center text-white font-bold font-mono"
-                                                value={userCaptcha} onChange={(e) => setUserCaptcha(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleCredentialSubmit()} />
-                                            <button onClick={() => {
-                                                const n1 = Math.floor(Math.random() * 9) + 1;
-                                                const n2 = Math.floor(Math.random() * 9) + 1;
-                                                setCaptcha({ q: `${n1} + ${n2}`, a: n1 + n2 });
-                                                setUserCaptcha('');
-                                            }} className="text-slate-500 hover:text-white">
-                                                <RefreshCw size={14} />
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
+                                {/* CAPTCHA completely removed - using backend rate limiter & lockout instead */}
 
                                 {/* Error */}
                                 {errorMsg && (
@@ -393,9 +453,9 @@ const Login = () => {
                                         className="flex-1 py-4 rounded-2xl font-bold bg-white/5 text-slate-400 uppercase text-[10px] tracking-widest hover:bg-white/10 transition-all">
                                         Back
                                     </button>
-                                    <button onClick={handleCredentialSubmit} disabled={loading}
-                                        className={`flex-[2] py-4 rounded-2xl font-bold text-white shadow-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-60 ${currentRole?.btn}`}>
-                                        {loading ? <Activity className="animate-spin" size={18} /> : 'Verify Identity →'}
+                                    <button onClick={handleCredentialSubmit} disabled={loading || (role === 'citizen' && idValid === false)}
+                                        className={`flex-[2] py-4 rounded-2xl font-bold text-white shadow-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-60 disabled:hover:scale-100 ${currentRole?.btn}`}>
+                                        {loading ? <Activity className="animate-spin" size={18} /> : (role === 'citizen' ? 'Send OTP →' : 'Verify Identity →')}
                                     </button>
                                 </div>
                             </motion.div>
@@ -410,10 +470,14 @@ const Login = () => {
                                 <div>
                                     <h3 className="text-xl font-bold text-white mb-1">Two-Factor Verification</h3>
                                     <p className="text-slate-400 text-sm">6-digit OTP sent to registered contact</p>
-                                    {maskedContact && <p className="text-slate-500 text-xs mt-1 font-mono">...{maskedContact}</p>}
-                                    <p className="text-slate-600 text-[10px] mt-2">Attempt {otpAttempts + 1} / 3</p>
-                                    {import.meta.env.DEV && (
-                                        <p className="text-blue-300 text-[10px] mt-1 font-mono">Dev OTP override: 123456</p>
+                                    {maskedContact && <p className="text-slate-500 text-xs mt-1 font-mono">{maskedContact}</p>}
+                                    <p className="text-slate-600 text-[10px] mt-2">Attempt {otpAttempts + 1} / 5</p>
+                                    {/* DEV MODE: Show OTP if backend returned it (offline/no-Twilio) */}
+                                    {devOtp && (
+                                        <div className="mt-3 px-4 py-2 rounded-xl bg-amber-500/10 border border-amber-400/30 text-amber-400 text-xs font-bold flex items-center justify-center gap-2">
+                                            <span>🛠 DEV MODE — Your OTP:</span>
+                                            <span className="text-lg tracking-widest font-extrabold text-amber-300">{devOtp}</span>
+                                        </div>
                                     )}
                                 </div>
 
@@ -464,14 +528,13 @@ const Login = () => {
                                 )}
 
                                 <div className="flex gap-3">
-                                    <button onClick={() => { setStep(2); setOtp(['', '', '', '', '', '']); setErrorMsg(''); }}
-                                        className="flex-1 py-4 rounded-2xl font-bold bg-white/5 text-slate-400 uppercase text-[10px] tracking-widest hover:bg-white/10 transition-all">
+                                    <button onClick={() => { setStep(2); setErrorMsg(''); setOtp(['', '', '', '', '', '']); setPassword(''); }}
+                                        className="w-full py-4 rounded-2xl font-bold bg-white/5 text-slate-400 uppercase text-[10px] tracking-widest hover:bg-white/10 transition-all">
                                         Back
                                     </button>
-                                    <button onClick={handleVerifyOtp}
-                                        disabled={loading || otp.join('').length < 6 || otpAttempts >= 3}
-                                        className={`flex-[2] py-4 rounded-2xl font-bold text-white shadow-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50 ${currentRole?.btn}`}>
-                                        {loading ? <Activity className="animate-spin" size={18} /> : 'Authorize Access →'}
+                                    <button onClick={handleVerifyOtp} disabled={loading || otp.join('').length !== 6}
+                                        className={`w-full py-4 rounded-2xl font-bold text-white shadow-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-60 disabled:hover:scale-100 ${currentRole?.btn}`}>
+                                        {loading ? <Activity className="animate-spin" size={18} /> : 'Verify & Login'}
                                     </button>
                                 </div>
                             </motion.div>

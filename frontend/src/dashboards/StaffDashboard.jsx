@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../utils/api";
+import { useAuth } from "../context/AuthContext";
 import "./StaffDashboard.css";
 
 const complaints = [
@@ -43,6 +44,7 @@ const notifs = [
 
 const StaffDashboard = () => {
     const navigate = useNavigate();
+    const auth = useAuth();
     const [tab, setTab] = useState("overview");
     const [sideOpen, setSideOpen] = useState(false);
     const [showNotif, setShowNotif] = useState(false);
@@ -50,6 +52,8 @@ const StaffDashboard = () => {
     const [searchQ, setSearchQ] = useState("");
     const [compList, setCompList] = useState(complaints);
     const [stats, setStats] = useState({ total: 48, pending: 12, verified: 28, fir: 8, filed: 36 });
+    const [isLoading, setIsLoading] = useState(true);
+    const [errorMsg, setErrorMsg] = useState("");
 
     // Staff Info
     const [staff, setStaff] = useState({ fullName: "Staff Sita R.", staffId: "STF-901", department: "Data Entry & Case Processing", role: "Clerk" });
@@ -59,10 +63,12 @@ const StaffDashboard = () => {
     const [dbNotifications, setDbNotifications] = useState([]);
 
     const fetchStaffData = async () => {
+        setIsLoading(true);
+        setErrorMsg("");
         try {
             // Fetch All Complaints
-            const compRes = await api.get('/complaints');
-            if (compRes.success) {
+            const compRes = await api.get('/complaints').catch(err => ({ success: false, error: err }));
+            if (compRes.success && compRes.data) {
                 const complaintsList = Array.isArray(compRes.data) ? compRes.data : [];
                 setDbComplaints(mapComplaints(complaintsList));
                 setStats(prev => ({
@@ -74,8 +80,8 @@ const StaffDashboard = () => {
             }
 
             // Fetch Case Files
-            const casesRes = await api.get('/cases');
-            if (casesRes.success) {
+            const casesRes = await api.get('/cases').catch(err => ({ success: false, error: err }));
+            if (casesRes.success && casesRes.data) {
                 const caseList = Array.isArray(casesRes.data) ? casesRes.data : [];
                 setDbCaseFiles(mapCaseFiles(caseList));
                 setStats(prev => ({
@@ -85,11 +91,16 @@ const StaffDashboard = () => {
             }
 
             // Fetch Notifications
-            const notifsRes = await api.get('/notifications');
-            if (notifsRes.success) setDbNotifications(Array.isArray(notifsRes.data) ? notifsRes.data : []);
+            const notifsRes = await api.get('/notifications').catch(err => ({ success: false, error: err }));
+            if (notifsRes.success && notifsRes.data) {
+                setDbNotifications(Array.isArray(notifsRes.data) ? notifsRes.data : []);
+            }
 
         } catch (err) {
             console.error("Staff Dashboard Refresh Error", err);
+            setErrorMsg("Terminal synchronization failed. Check local network.");
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -122,15 +133,18 @@ const StaffDashboard = () => {
     };
 
     const mapStatus = (s) => {
+        const normalized = (s || '').toString().toLowerCase();
         const map = {
             'submitted': 'Pending Verification',
+            'under_review': 'Under Review',
             'verified': 'Verified',
-            'fir_filed': 'FIR Filed',
-            'case_filed': 'Case Filed',
-            'under_investigation': 'Under Investigation',
-            'closed': 'Resolved'
+            'investigation': 'Investigation',
+            'resolved': 'Resolved',
+            'closed': 'Closed',
+            'rejected': 'Rejected',
+            'escalated': 'Escalated'
         };
-        return map[s] || 'Pending Verification';
+        return map[normalized] || s || 'Pending Verification';
     };
 
     useEffect(() => {
@@ -144,10 +158,13 @@ const StaffDashboard = () => {
 
     const unread = (dbNotifications.length > 0 ? dbNotifications : notifs).filter(n => n.unread || n.is_read === false).length;
     const statusBadge = (s) => {
-        if (s.includes("Pending")) return "bg-amber-500/15 text-amber-400 border border-amber-400/20";
-        if (s === "Verified") return "bg-cyan-500/15 text-cyan-400 border border-cyan-400/20";
-        if (s.includes("FIR") || s.includes("Filed") || s === "Case Filed") return "bg-green-500/15 text-green-400 border border-green-400/20";
-        if (s === "Active") return "bg-cyan-500/15 text-cyan-400 border border-cyan-400/20";
+        const status = (s || '').toString().toLowerCase();
+        if (status.includes("pending") || status === 'submitted' || status === 'under review') return "bg-amber-500/15 text-amber-400 border border-amber-400/20";
+        if (status === "verified") return "bg-cyan-500/15 text-cyan-400 border border-cyan-400/20";
+        if (status === "investigation" || status === "under investigation") return "bg-blue-500/15 text-blue-400 border border-blue-400/20";
+        if (status === "resolved" || status === "closed") return "bg-green-500/15 text-green-400 border border-green-400/20";
+        if (status === "rejected") return "bg-red-500/15 text-red-400 border border-red-400/20";
+        if (status === "active") return "bg-cyan-500/15 text-cyan-400 border border-cyan-400/20";
         return "bg-slate-500/15 text-slate-400 border border-slate-400/20";
     };
     const accessBadge = (a) => {
@@ -202,7 +219,7 @@ const StaffDashboard = () => {
                             <div className="flex-1 min-w-0"><div className="text-xs font-semibold text-slate-200 truncate">{c.title} — {c.citizen}</div><div className="text-[9px] text-slate-600 font-mono">{c.id} · {c.date}</div></div>
                             <button onClick={async () => {
                                 try {
-                                    await api.put(`/complaints/${c.realId}`, { status: 'verified' });
+                                    await api.patch(`/complaints/${c.realId}`, { status: 'verified' });
                                     fetchStaffData();
                                 } catch (err) { alert(err.message); }
                             }} className="px-2 py-1 rounded text-[9px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-400/20 hover:bg-emerald-500/20">Verify</button>
@@ -271,7 +288,7 @@ const StaffDashboard = () => {
                         <div className="flex gap-2">
                             {!c.verified && <button onClick={async () => {
                                 try {
-                                    await api.put(`/complaints/${c.realId}`, { status: 'verified' });
+                                    await api.patch(`/complaints/${c.realId}`, { status: 'verified' });
                                     fetchStaffData();
                                 } catch (err) { alert(err.message); }
                             }} className="px-3 py-1.5 rounded-lg text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-400/20 hover:bg-emerald-500/20 flex items-center gap-1"><CheckCircle2 size={12} /> Verify</button>}
@@ -446,6 +463,37 @@ const StaffDashboard = () => {
 
     const renderContent = () => (R[tab] ? R[tab]() : R.overview());
 
+    if (isLoading) {
+        return (
+            <div className="min-h-screen bg-[#070b14] flex items-center justify-center">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="sd-loader-circle w-12 h-12 border-2 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin shadow-[0_0_15px_rgba(16,185,129,0.3)]" />
+                    <p className="text-slate-500 text-[10px] uppercase tracking-widest font-bold animate-pulse">Syncing Staff Records...</p>
+                </div>
+            </div>
+        );
+    }
+
+    if (errorMsg) {
+        return (
+            <div className="min-h-screen bg-[#070b14] flex items-center justify-center p-6">
+                <div className="glass-card p-8 max-w-md w-full text-center border-emerald-500/20 shadow-[0_0_30px_rgba(16,185,129,0.1)]">
+                    <div className="w-16 h-16 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-400 mx-auto mb-6 border border-emerald-500/20">
+                        <AlertTriangle size={32} />
+                    </div>
+                    <h2 className="text-xl font-bold text-white mb-2">Terminal Offline</h2>
+                    <p className="text-slate-400 text-sm mb-6">{errorMsg}</p>
+                    <button onClick={fetchStaffData} className="sd-btn bg-emerald-600 hover:bg-emerald-500 w-full py-3 flex items-center justify-center gap-2">
+                        <RefreshCw size={16} /> Retry Uplink
+                    </button>
+                    <button onClick={() => navigate('/')} className="mt-4 text-[10px] uppercase tracking-widest font-bold text-slate-600 hover:text-slate-400">
+                        Exit to Home
+                    </button>
+                </div>
+            </div>
+        );
+    }
+
     return (
         <div className="min-h-screen grid-bg" style={{ background: "var(--dark-bg)" }}>
             <aside className={`sd-sidebar ${sideOpen ? "open" : ""}`}>
@@ -466,7 +514,11 @@ const StaffDashboard = () => {
                         <div className="w-7 h-7 rounded-lg bg-emerald-500/15 flex items-center justify-center text-emerald-400 border border-emerald-400/15"><User size={13} /></div>
                         <div><div className="text-[11px] font-bold text-slate-300">{staff.fullName}</div><div className="text-[8px] text-slate-600">ID: {staff.staffId}</div></div>
                     </div>
-                    <button onClick={() => { localStorage.clear(); navigate("/"); }} className="sd-nav-btn text-red-400 hover:bg-red-500/10 w-full"><LogOut size={15} /> Sign Out</button>
+                </div>
+                <div className="p-3 border-t border-white/5">
+                    <button onClick={() => { auth.logout(); navigate("/"); }} className="sd-nav-item w-full text-red-400 hover:bg-red-500/10 hover:text-red-400">
+                        <LogOut size={18} /> Sign Out
+                    </button>
                 </div>
             </aside>
 

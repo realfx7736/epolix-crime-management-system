@@ -6,49 +6,35 @@ import UserDashboard from "./dashboards/UserDashboard";
 import AdminDashboard from "./dashboards/AdminDashboard";
 import PoliceDashboard from "./dashboards/PoliceDashboard";
 import StaffDashboard from "./dashboards/StaffDashboard";
+import { AuthProvider, useAuth } from './context/AuthContext';
 import './index.css';
 
-// ─── JWT token validation (check expiry without library) ─────────────────────
-const isTokenExpired = (token) => {
-    try {
-        const payloadSegment = token.split('.')[1] || '';
-        const base64 = payloadSegment.replace(/-/g, '+').replace(/_/g, '/');
-        const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=');
-        const payload = JSON.parse(atob(padded));
-        return payload.exp * 1000 < Date.now();
-    } catch {
-        return true;
-    }
-};
-
-// ─── Protected Route with token expiry check ──────────────────────────────────
+// ─── Protected Route — uses AuthContext (not raw localStorage) ────────────────
+// This prevents the race condition where localStorage is written but React
+// state hasn't updated yet, causing an immediate redirect back to login.
 const ProtectedRoute = ({ children, allowedRoles }) => {
-    const token = localStorage.getItem('token');
-    const userStr = localStorage.getItem('user');
+    const { isAuthenticated, user, loading } = useAuth();
     const location = useLocation();
 
-    // No token or user data
-    if (!token || !userStr) {
+    // Wait for session hydration before deciding
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-[#070b14] flex items-center justify-center">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="w-10 h-10 border-2 border-blue-500/30 border-t-blue-500 rounded-full animate-spin" />
+                    <p className="text-slate-500 text-xs uppercase tracking-widest font-bold">Verifying session...</p>
+                </div>
+            </div>
+        );
+    }
+
+    // Not authenticated → redirect to login
+    if (!isAuthenticated) {
         return <Navigate to="/login" state={{ from: location }} replace />;
     }
 
-    // Token expired
-    if (isTokenExpired(token)) {
-        localStorage.clear();
-        return <Navigate to="/login?session=expired" replace />;
-    }
-
-    let user;
-    try {
-        user = JSON.parse(userStr);
-    } catch {
-        localStorage.clear();
-        return <Navigate to="/login" replace />;
-    }
-
-    // Role mismatch
-    if (allowedRoles && !allowedRoles.includes(user.role)) {
-        // Redirect to correct dashboard
+    // Role mismatch → redirect to correct dashboard
+    if (allowedRoles && user && !allowedRoles.includes(user.role)) {
         const roleRoutes = {
             citizen: '/user',
             police: '/police',
@@ -68,22 +54,21 @@ const INACTIVITY_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 
 const useAutoLogout = () => {
     const navigate = useNavigate();
+    const { isAuthenticated, logout } = useAuth();
 
-    const logout = useCallback(() => {
-        localStorage.clear();
-        navigate('/login?session=expired', { replace: true });
-    }, [navigate]);
+    const handleLogout = useCallback(() => {
+        logout('expired');
+    }, [logout]);
 
     useEffect(() => {
         // Only activate auto-logout if authenticated
-        const token = localStorage.getItem('token');
-        if (!token) return;
+        if (!isAuthenticated) return;
 
         let timeout;
 
         const resetTimer = () => {
             clearTimeout(timeout);
-            timeout = setTimeout(logout, INACTIVITY_TIMEOUT_MS);
+            timeout = setTimeout(handleLogout, INACTIVITY_TIMEOUT_MS);
         };
 
         const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
@@ -94,10 +79,10 @@ const useAutoLogout = () => {
             events.forEach(e => window.removeEventListener(e, resetTimer));
             clearTimeout(timeout);
         };
-    }, [logout]);
+    }, [isAuthenticated, handleLogout]);
 };
 
-// ─── Inner App (uses hooks that require Router context) ───────────────────────
+// ─── Inner App (uses hooks that require Router + AuthProvider context) ─────────
 const AppInner = () => {
     useAutoLogout();
 
@@ -110,6 +95,14 @@ const AppInner = () => {
             {/* ── Citizen Dashboard ── */}
             <Route
                 path="/user"
+                element={
+                    <ProtectedRoute allowedRoles={['citizen']}>
+                        <UserDashboard />
+                    </ProtectedRoute>
+                }
+            />
+            <Route
+                path="/citizen/home"
                 element={
                     <ProtectedRoute allowedRoles={['citizen']}>
                         <UserDashboard />
@@ -157,7 +150,9 @@ const AppInner = () => {
 export default function App() {
     return (
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-            <AppInner />
+            <AuthProvider>
+                <AppInner />
+            </AuthProvider>
         </BrowserRouter>
     );
 }

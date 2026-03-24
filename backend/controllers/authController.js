@@ -9,20 +9,81 @@ const getIp = (req) =>
 const isProduction = process.env.NODE_ENV === 'production';
 const withSafeAuthError = (fallback, actual) => (isProduction ? fallback : actual);
 
-// ─── Citizen: Aadhaar verification → OTP ──────────────────────────────────
+// ─── Citizen: Smart Login (Mobile/Email/CIT-ID) → OTP ────────────────────
 const citizenLogin = async (req, res) => {
     try {
-        const { aadhaarNumber } = req.body;
-        if (!aadhaarNumber) {
-            return res.status(400).json({ success: false, error: 'Aadhaar number is required.' });
+        const { identifier, password } = req.body;
+        if (!identifier) {
+            return res.status(400).json({ success: false, error: 'Identity identifier is required.' });
         }
-        const result = await authService.citizenLogin(aadhaarNumber, getIp(req));
+        const result = await authService.citizenLogin(identifier, password, getIp(req));
+        return res.status(200).json(result);
+    } catch (err) {
+        return res.status(401).json({
+            success: false,
+            error: withSafeAuthError('Authentication failed. Please try again.', err.message)
+        });
+    }
+};
+
+// ─── Citizen Direct Mobile OTP Flow ───────────────────────────────────────
+const sendLoginOTP = async (req, res) => {
+    try {
+        const { mobile_number, identifier } = req.body;
+        const mobile = mobile_number || identifier; // Support both payloads
+        if (!mobile) {
+            return res.status(400).json({ success: false, error: 'Mobile number is required.' });
+        }
+        const result = await authService.sendLoginOTP(mobile, getIp(req));
         return res.status(200).json(result);
     } catch (err) {
         return res.status(400).json({
             success: false,
-            error: withSafeAuthError('Authentication failed. Please try again.', err.message)
+            error: withSafeAuthError('Failed to send OTP.', err.message)
         });
+    }
+};
+
+const verifyLoginOTP = async (req, res) => {
+    try {
+        const { mobile_number, identifier, otp } = req.body;
+        const mobile = mobile_number || identifier;
+        if (!mobile || !otp) {
+            return res.status(400).json({ success: false, error: 'Mobile number and OTP are required.' });
+        }
+        const result = await authService.verifyLoginOTP(mobile, otp, getIp(req));
+        return res.status(200).json(result);
+    } catch (err) {
+        return res.status(401).json({
+            success: false,
+            error: withSafeAuthError('OTP Verification Failed.', err.message)
+        });
+    }
+};
+
+
+// ─── Aadhaar KYC: Flow ────────────────────────────────────────────────────
+const sendAadhaarOTP = async (req, res) => {
+    try {
+        const { aadhaarNumber } = req.body;
+        const userId = req.user.id;
+        if (!aadhaarNumber) return res.status(400).json({ success: false, error: 'Aadhaar required.' });
+        const result = await authService.sendAadhaarOTP(userId, aadhaarNumber);
+        return res.status(200).json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, error: err.message });
+    }
+};
+
+const verifyAadhaarOTP = async (req, res) => {
+    try {
+        const { aadhaarNumber, otp } = req.body;
+        const userId = req.user.id;
+        if (!aadhaarNumber || !otp) return res.status(400).json({ success: false, error: 'Aadhaar and OTP required.' });
+        const result = await authService.verifyAadhaarOTP(userId, aadhaarNumber, otp);
+        return res.status(200).json(result);
+    } catch (err) {
+        return res.status(400).json({ success: false, error: err.message });
     }
 };
 
@@ -30,8 +91,8 @@ const citizenLogin = async (req, res) => {
 const terminalLogin = async (req, res) => {
     try {
         const { role, identifier, password } = req.body;
-        if (!role || !identifier || !password) {
-            return res.status(400).json({ success: false, error: 'role, identifier, and password are required.' });
+        if (!role || !identifier) {
+            return res.status(400).json({ success: false, error: 'role and identifier are required.' });
         }
         const result = await authService.terminalLogin(role, identifier, password, getIp(req));
         return res.status(200).json(result);
@@ -40,6 +101,37 @@ const terminalLogin = async (req, res) => {
             success: false,
             error: withSafeAuthError('Authentication failed. Please check credentials and try again.', err.message)
         });
+    }
+};
+
+// ─── Explicit Requested Login / OTP ──────────────────────────────────────────
+const policeLoginExplicit = async (req, res) => {
+    try {
+        const { identifier, password } = req.body;
+        if (!identifier || !password) return res.status(400).json({ success: false, error: 'identifier and password are required.' });
+        const result = await authService.terminalLogin('police', identifier, password, getIp(req));
+        return res.status(200).json(result);
+    } catch (err) {
+        return res.status(500).json({ success: false, error: withSafeAuthError('Authentication failed.', err.message) });
+    }
+};
+
+const staffLoginExplicit = async (req, res) => {
+    try {
+        const { identifier, password } = req.body;
+        if (!identifier || !password) return res.status(400).json({ success: false, error: 'identifier and password are required.' });
+        const result = await authService.terminalLogin('staff', identifier, password, getIp(req));
+        return res.status(200).json(result);
+    } catch (err) {
+        return res.status(500).json({ success: false, error: withSafeAuthError('Authentication failed.', err.message) });
+    }
+};
+
+const generateOtpExplicit = async (req, res) => {
+    try {
+        return await sendLoginOTP(req, res);
+    } catch (err) {
+        return res.status(500).json({ success: false, error: 'Failed to generate OTP' });
     }
 };
 
@@ -99,6 +191,7 @@ const seedDatabase = async (req, res) => {
         const result = await authService.seedDatabase();
         return res.status(200).json({ success: true, ...result });
     } catch (err) {
+        console.error('Seed Error:', err);
         return res.status(500).json({ success: false, error: err.message });
     }
 };
@@ -114,13 +207,35 @@ const getProfile = async (req, res) => {
     }
 };
 
+// ─── Refresh Token ────────────────────────────────────────────────────────────
+const refreshToken = async (req, res) => {
+    try {
+        const { refreshToken: refreshTokenStr } = req.body;
+        if (!refreshTokenStr) {
+            return res.status(400).json({ success: false, error: 'Refresh token required.' });
+        }
+        const result = await authService.refreshAccessToken(refreshTokenStr);
+        return res.status(200).json(result);
+    } catch (err) {
+        return res.status(401).json({ success: false, error: err.message });
+    }
+};
+
 module.exports = {
     citizenLogin,
     terminalLogin,
     verifyOTP,
+    refreshToken,
     registerPoliceOfficer,
     registerStaff,
     registerAdmin,
     seedDatabase,
     getProfile,
+    sendAadhaarOTP,
+    verifyAadhaarOTP,
+    sendLoginOTP,
+    verifyLoginOTP,
+    policeLoginExplicit,
+    staffLoginExplicit,
+    generateOtpExplicit
 };

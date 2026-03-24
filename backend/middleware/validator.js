@@ -52,16 +52,40 @@ const otpVerifySchema = Joi.object({
 });
 
 const citizenLoginSchema = Joi.object({
+    identifier: Joi.string().trim().min(3).max(255).required().messages({
+        'any.required': 'Mobile number, Email or Citizen ID is required'
+    }),
+    password: Joi.string().allow('').optional()
+});
+
+const mobileOtpSendSchema = Joi.object({
+    mobile_number: Joi.string().pattern(/^[6-9]\d{9}$/).optional(),
+    identifier: Joi.string().pattern(/^[6-9]\d{9}$/).optional()
+}).or('mobile_number', 'identifier').messages({
+    'object.missing': 'Please provide a valid 10-digit mobile number'
+});
+
+const mobileOtpVerifySchema = Joi.object({
+    mobile_number: Joi.string().pattern(/^[6-9]\d{9}$/).optional(),
+    identifier: Joi.string().pattern(/^[6-9]\d{9}$/).optional(),
+    otp: Joi.string().pattern(/^\d{6}$/).required().messages({
+        'string.pattern.base': 'OTP must be exactly 6 digits',
+        'any.required': 'OTP is required'
+    })
+}).or('mobile_number', 'identifier');
+
+const aadhaarKycSchema = Joi.object({
     aadhaarNumber: Joi.string().pattern(/^\d{12}$/).required().messages({
         'string.pattern.base': 'Aadhaar must be exactly 12 digits',
         'any.required': 'Aadhaar number is required'
-    })
+    }),
+    otp: Joi.string().pattern(/^\d{6}$/).optional()
 });
 
 const terminalLoginSchema = Joi.object({
     role: Joi.string().valid('police', 'staff', 'admin').required(),
     identifier: Joi.string().trim().max(120).required(),
-    password: Joi.string().min(1).max(256).required()
+    password: Joi.string().allow('').optional()
 });
 
 const verifyOtpLoginSchema = Joi.object({
@@ -81,8 +105,8 @@ const complaintSchema = Joi.object({
         'string.min': 'Title must be at least 5 characters',
         'any.required': 'Complaint title is required'
     }),
-    description: Joi.string().min(20).max(5000).required().messages({
-        'string.min': 'Description must be at least 20 characters',
+    description: Joi.string().min(5).max(5000).required().messages({
+        'string.min': 'Description must be at least 5 characters',
         'any.required': 'Complaint description is required'
     }),
     category_id: Joi.string().uuid().optional(),
@@ -191,9 +215,12 @@ module.exports = {
     citizenLoginSchema,
     terminalLoginSchema,
     verifyOtpLoginSchema,
+    mobileOtpSendSchema,
+    mobileOtpVerifySchema,
     complaintSchema,
     complaintUpdateSchema,
     caseSchema,
     caseUpdateSchema,
-    investigationNoteSchema
+    investigationNoteSchema,
+    aadhaarKycSchema
 };

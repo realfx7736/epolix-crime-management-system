@@ -10,7 +10,7 @@ router.get('/categories', complaintController.getCategories);
 router.get('/track/:number', complaintController.track);
 
 // ---- Protected: Any authenticated user can file a complaint ----
-router.post('/', authenticate, validate(complaintSchema), complaintController.create);
+router.post('/', optionalAuth, validate(complaintSchema), complaintController.create);
 router.get('/my', authenticate, complaintController.getMyComplaints);
 
 // ---- Protected: Staff, Police, Admin can view & manage all ----

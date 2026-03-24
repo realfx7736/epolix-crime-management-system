@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../utils/api";
+import { useAuth } from "../context/AuthContext";
 import "./PoliceDashboard.css";
 
 // ─── MOCK DATA ──────────────────────────────────────────
@@ -54,6 +55,7 @@ const weeklyStats = [
 // ─── MAIN COMPONENT ────────────────────────────────────
 const PoliceDashboard = () => {
     const navigate = useNavigate();
+    const auth = useAuth();
     const [activeTab, setActiveTab] = useState("overview");
     const [sidebarOpen, setSidebarOpen] = useState(false);
     const [showNotif, setShowNotif] = useState(false);
@@ -70,36 +72,45 @@ const PoliceDashboard = () => {
     const [liveStats, setLiveStats] = useState({ pending: 14, investigating: 23, onsite: 5, closed: 187 });
     // Officer Info
     const [officer, setOfficer] = useState({ fullName: "SI Vikram Rathore", policeId: "OFF-110", station: "Saket Division", rank: "SI" });
+    const [isLoading, setIsLoading] = useState(true);
+    const [errorMsg, setErrorMsg] = useState("");
 
     const [dbCases, setDbCases] = useState([]);
     const [dbNotifications, setDbNotifications] = useState([]);
 
     const fetchOfficerData = async () => {
+        setIsLoading(true);
+        setErrorMsg("");
         try {
             // Fetch Overview Stats
-            const overview = await api.get('/dashboard/overview');
-            if (overview.success) {
+            const overview = await api.get('/dashboard/overview').catch(err => ({ success: false, error: err }));
+            if (overview.success && overview.data) {
                 const o = overview.data.overview || {};
                 setLiveStats({
                     pending: o.pendingComplaints || 0,
                     investigating: o.activeCases || 0,
-                    onsite: Math.floor(Math.random() * 5), // Mock for now if no real field for this
+                    onsite: Math.floor(Math.random() * 5),
                     closed: o.resolvedCases || 0
                 });
             }
 
-            // Fetch My Cases (Officers only)
-            const casesRes = await api.get('/cases/my');
-            if (casesRes.success) {
+            // Fetch My Cases
+            const casesRes = await api.get('/cases/my').catch(err => ({ success: false, error: err }));
+            if (casesRes.success && casesRes.data) {
                 setDbCases(mapCases(casesRes.data));
             }
 
             // Fetch Notifications
-            const notifsRes = await api.get('/notifications');
-            if (notifsRes.success) setDbNotifications(Array.isArray(notifsRes.data) ? notifsRes.data : []);
+            const notifsRes = await api.get('/notifications').catch(err => ({ success: false, error: err }));
+            if (notifsRes.success && notifsRes.data) {
+                setDbNotifications(Array.isArray(notifsRes.data) ? notifsRes.data : []);
+            }
 
         } catch (err) {
             console.error("Police Dashboard Refresh Error", err);
+            setErrorMsg("UHF Secure Link Interrupted. Retrying sync...");
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -571,6 +582,45 @@ const PoliceDashboard = () => {
         }
     };
 
+    if (isLoading) {
+        return (
+            <div className="min-h-screen bg-[#060a12] flex items-center justify-center">
+                <div className="flex flex-col items-center gap-4 text-center">
+                    <div className="relative">
+                        <div className="w-16 h-16 border-2 border-cyan-500/10 border-t-cyan-400 rounded-full animate-spin" />
+                        <Shield className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-cyan-400/30" size={24} />
+                    </div>
+                    <div>
+                        <p className="text-cyan-400 text-[10px] uppercase tracking-[0.3em] font-black">Connecting Secure Uplink</p>
+                        <p className="text-slate-600 text-[8px] uppercase mt-1">Authenticating Terminal ID: {officer.policeId}</p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    if (errorMsg) {
+        return (
+            <div className="min-h-screen bg-[#060a12] flex items-center justify-center p-6">
+                <div className="glass-card p-10 max-w-lg w-full text-center border-cyan-500/10 shadow-[0_0_40px_rgba(0,212,255,0.05)]">
+                    <div className="w-20 h-20 rounded-2xl bg-cyan-500/5 flex items-center justify-center text-cyan-400 mx-auto mb-8 border border-cyan-400/10 rotate-45">
+                        <AlertCircle size={40} className="-rotate-45" />
+                    </div>
+                    <h2 className="text-2xl font-black text-white mb-3 tracking-tight">TERMINAL DISCONNECTED</h2>
+                    <p className="text-slate-400 text-sm mb-8 leading-relaxed">{errorMsg}</p>
+                    <div className="space-y-3">
+                        <button onClick={fetchOfficerData} className="w-full py-3.5 rounded-xl font-bold text-sm text-[#060a12] bg-cyan-400 hover:bg-cyan-300 shadow-[0_0_20px_rgba(0,212,255,0.3)] transition-all flex items-center justify-center gap-2">
+                            <RefreshCw size={18} /> Reconnect Terminal
+                        </button>
+                        <button onClick={() => navigate('/')} className="w-full py-3.5 rounded-xl font-bold text-sm text-slate-400 bg-white/5 hover:bg-white/10 border border-white/5 transition-all">
+                            Exit Lockdown Mode
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
     // ─── MAIN RENDER ──────────────────────────────────────
     return (
         <div className="min-h-screen grid-bg" style={{ background: "var(--dark-bg)" }}>
@@ -613,8 +663,8 @@ const PoliceDashboard = () => {
                             <div className="text-[9px] text-slate-600">ID: {officer.policeId}</div>
                         </div>
                     </div>
-                    <button onClick={() => { localStorage.clear(); navigate("/"); }} className="pd-nav-btn text-red-400 hover:bg-red-500/10 w-full">
-                        <LogOut size={16} /> Sign Out
+                    <button onClick={() => { auth.logout(); navigate("/"); }} className="pd-nav-item w-full text-red-400 hover:bg-red-500/10 hover:text-red-400">
+                        <LogOut size={18} /> Sign Out
                     </button>
                 </div>
             </aside>

@@ -59,4 +59,11 @@ const remove = async (req, res, next) => {
     } catch (err) { next(err); }
 };
 
-module.exports = { upload, uploadMultiple, getByCase, getByComplaint, getById, verify, remove };
+const getAll = async (req, res, next) => {
+    try {
+        const evidence = await evidenceService.getAll();
+        res.json({ success: true, data: evidence });
+    } catch (err) { next(err); }
+};
+
+module.exports = { getAll, upload, uploadMultiple, getByCase, getByComplaint, getById, verify, remove };

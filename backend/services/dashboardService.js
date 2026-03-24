@@ -6,72 +6,62 @@ class DashboardService {
 
     // Get overall crime statistics
     async getOverviewStats() {
-        // Total complaints
-        const { count: totalComplaints } = await supabase
-            .from('complaints')
-            .select('id', { count: 'exact', head: true });
+        try {
+            const [
+                { count: totalComplaints },
+                { data: complaintsByStatus, error: statusError },
+                { count: totalCases },
+                { count: activeCases },
+                { data: usersByRole, error: roleError },
+                { count: pendingComplaints },
+                { count: resolvedCases },
+                { count: totalEvidence }
+            ] = await Promise.all([
+                supabase.from('complaints').select('id', { count: 'exact', head: true }),
+                supabase.rpc('get_complaint_status_counts'),
+                supabase.from('cases').select('id', { count: 'exact', head: true }),
+                supabase.from('cases').select('id', { count: 'exact', head: true }).not('status', 'in', ['closed', 'convicted', 'acquitted']),
+                supabase.rpc('get_user_role_counts'),
+                supabase.from('complaints').select('id', { count: 'exact', head: true }).in('status', ['submitted', 'under_review']),
+                supabase.from('cases').select('id', { count: 'exact', head: true }).in('status', ['closed', 'convicted']),
+                supabase.from('evidence').select('id', { count: 'exact', head: true })
+            ]);
 
-        // Complaints by status
-        const { data: complaintsByStatus } = await supabase
-            .rpc('get_complaint_status_counts')
-            .catch(() => ({ data: null }));
+            if (statusError) logger.warn('RPC get_complaint_status_counts failed, using fallback:', statusError.message);
+            if (roleError) logger.warn('RPC get_user_role_counts failed, using fallback:', roleError.message);
 
-        // Total cases
-        const { count: totalCases } = await supabase
-            .from('cases')
-            .select('id', { count: 'exact', head: true });
+            // If RPC functions don't exist, do manual counting
+            let statusBreakdown = complaintsByStatus;
+            if (!statusBreakdown) {
+                statusBreakdown = await this._getComplaintStatusCounts();
+            }
 
-        // Active cases (not closed/convicted/acquitted)
-        const { count: activeCases } = await supabase
-            .from('cases')
-            .select('id', { count: 'exact', head: true })
-            .not('status', 'in', '("closed","convicted","acquitted")');
+            let roleBreakdown = usersByRole;
+            if (!roleBreakdown) {
+                roleBreakdown = await this._getUserRoleCounts();
+            }
 
-        // Total users by role
-        const { data: usersByRole } = await supabase
-            .rpc('get_user_role_counts')
-            .catch(() => ({ data: null }));
-
-        // Pending complaints
-        const { count: pendingComplaints } = await supabase
-            .from('complaints')
-            .select('id', { count: 'exact', head: true })
-            .in('status', ['submitted', 'under_review']);
-
-        // Resolved cases
-        const { count: resolvedCases } = await supabase
-            .from('cases')
-            .select('id', { count: 'exact', head: true })
-            .in('status', ['closed', 'convicted']);
-
-        // Total evidence files
-        const { count: totalEvidence } = await supabase
-            .from('evidence')
-            .select('id', { count: 'exact', head: true });
-
-        // If RPC functions don't exist, do manual counting
-        let statusBreakdown = complaintsByStatus;
-        if (!statusBreakdown) {
-            statusBreakdown = await this._getComplaintStatusCounts();
+            return {
+                overview: {
+                    totalComplaints: totalComplaints || 0,
+                    totalCases: totalCases || 0,
+                    activeCases: activeCases || 0,
+                    pendingComplaints: pendingComplaints || 0,
+                    resolvedCases: resolvedCases || 0,
+                    totalEvidence: totalEvidence || 0
+                },
+                complaintsByStatus: statusBreakdown,
+                usersByRole: roleBreakdown
+            };
+        } catch (err) {
+            logger.error('Error fetching dashboard stats:', err.message);
+            // Return defaults instead of throwing to prevent blank screen
+            return {
+                overview: { totalComplaints: 0, totalCases: 0, activeCases: 0, pendingComplaints: 0, resolvedCases: 0, totalEvidence: 0 },
+                complaintsByStatus: {},
+                usersByRole: {}
+            };
         }
-
-        let roleBreakdown = usersByRole;
-        if (!roleBreakdown) {
-            roleBreakdown = await this._getUserRoleCounts();
-        }
-
-        return {
-            overview: {
-                totalComplaints: totalComplaints || 0,
-                totalCases: totalCases || 0,
-                activeCases: activeCases || 0,
-                pendingComplaints: pendingComplaints || 0,
-                resolvedCases: resolvedCases || 0,
-                totalEvidence: totalEvidence || 0
-            },
-            complaintsByStatus: statusBreakdown,
-            usersByRole: roleBreakdown
-        };
     }
 
     // Manual complaint status counting (fallback)

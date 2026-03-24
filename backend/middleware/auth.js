@@ -7,10 +7,10 @@ const { supabase } = require('../config/supabase');
 // ─── Role-to-table mapping (Unified Users Table) ────────────────────────────
 const ROLE_TABLE_MAP = {
     citizen: 'users',
-    police: 'users',
-    staff: 'users',
-    admin: 'users',
-    super_admin: 'users',
+    police: 'police_officers',
+    staff: 'staff_members',
+    admin: 'admin_users',
+    super_admin: 'admin_users',
 };
 
 const LOCAL_DB_PATH = path.join(__dirname, '../data/local_db.json');
@@ -169,7 +169,43 @@ const authenticate = async (req, res, next) => {
         const token = authHeader.split(' ')[1];
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
 
+        // For auto-onboarded local citizens (no DB record), build user from token payload
+        const isLocalAutoUser = String(decoded.userId || '').startsWith('local-cit-');
+        if (isLocalAutoUser && isLocalAuthEnabled()) {
+            req.user = {
+                id: decoded.userId,
+                fullName: decoded.name || 'Local Citizen',
+                email: decoded.email || null,
+                phone: decoded.phone || null,
+                role: decoded.role || 'citizen',
+                isVerified: true,
+            };
+            return next();
+        }
+
         const { user, error } = await fetchUserByRole(decoded.role, decoded.userId);
+
+        // SOURCE OF TRUTH FALLBACK (Development Mode)
+        // If Supabase is offline OR the user is missing from the DB (but token is valid),
+        // trust the JWT payload to maintain the session. This is critical for 
+        // local dev stability where DB state may be lost or disconnected.
+        if (!user && isLocalAuthEnabled()) {
+            if (error) console.warn(`[Auth] DB lookup failed (${error.message || 'unknown'}). Trusting JWT payload.`);
+            else console.log(`[Auth] User ${decoded.userId} not in DB. Trusting active session token.`);
+
+            req.user = {
+                id: decoded.userId,
+                fullName: decoded.name || 'User',
+                email: decoded.email || null,
+                phone: decoded.phone || null,
+                role: decoded.role || 'citizen',
+                isVerified: true,
+                station: decoded.station || null,
+                rank: decoded.rank || null
+            };
+            return next();
+        }
+
         if (error || !user) {
             throw ApiError.unauthorized('User not found or token invalid.');
         }
@@ -217,17 +253,7 @@ const optionalAuth = async (req, res, next) => {
     }
 };
 
-// ─── Strict ID format validators ────────────────────────────────────────────
-const validatePoliceId = (id) => /^OFF-\d{3,6}$/.test(id);
-const validateStaffId = (id) => /^STF-\d{3,6}$/.test(id);
-const validateAdminId = (id) => /^ADM-[A-Z]{2}-\d{4}-\d{4}$/.test(id);
-const validateAadhaar = (num) => /^\d{12}$/.test((num || '').replace(/\s|-/g, ''));
-
 module.exports = {
     authenticate,
     optionalAuth,
-    validatePoliceId,
-    validateStaffId,
-    validateAdminId,
-    validateAadhaar,
 };

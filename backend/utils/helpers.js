@@ -119,6 +119,62 @@ const getFileCategory = (mimeType) => {
     return 'other';
 };
 
+// Send OTP via SMS API (Twilio implementation)
+const sendSMS = async (phone, message) => {
+    const hasTwilioConfig = process.env.TWILIO_ACCOUNT_SID &&
+        process.env.TWILIO_AUTH_TOKEN &&
+        process.env.TWILIO_PHONE_NUMBER;
+
+    // DEVELOPMENT: Log to console if Twilio not fully configured or in test mode
+    if (!hasTwilioConfig || process.env.NODE_ENV === 'test') {
+        console.log(`[DEV SMS] To: ${phone} | Msg: ${message}`);
+        return true; // pretend success so OTP flow continues
+    }
+
+    try {
+        const twilio = require('twilio');
+        const client = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+
+        // Ensure phone is in E.164 format (e.g., +919876543210)
+        let formattedPhone = phone.trim().replace(/\s/g, '');
+        if (!formattedPhone.startsWith('+')) {
+            formattedPhone = `+91${formattedPhone}`; // Default to India
+        }
+
+        // Wrap in a 10-second timeout so a Twilio failure never hangs the server
+        const smsPromise = client.messages.create({
+            body: message,
+            from: process.env.TWILIO_PHONE_NUMBER,
+            to: formattedPhone
+        });
+        const timeoutPromise = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Twilio timeout after 10s')), 10000)
+        );
+
+        const response = await Promise.race([smsPromise, timeoutPromise]);
+
+        if (process.env.NODE_ENV !== 'production') {
+            console.log(`[Twilio SMS] SID: ${response.sid} | Status: ${response.status}`);
+        }
+        return true;
+    } catch (err) {
+        console.error('Twilio SMS Error:', err.message);
+        return false;
+    }
+};
+
+// Send Email via SMTP / Resend / Mailgun
+const sendEmail = async (email, subject, body) => {
+    // DEVELOPMENT: Log to console
+    if (process.env.NODE_ENV !== 'production') {
+        console.log(`[EMAIL] To: ${email} | Sub: ${subject}`);
+        return true;
+    }
+    // PRODUCTION: Implement Email API
+    // await transporter.sendMail({ from, to: email, subject, html: body });
+    return true;
+};
+
 module.exports = {
     generateComplaintNumber,
     generateCaseNumber,
@@ -131,5 +187,7 @@ module.exports = {
     sanitize,
     paginate,
     paginatedResponse,
-    getFileCategory
+    getFileCategory,
+    sendSMS,
+    sendEmail
 };

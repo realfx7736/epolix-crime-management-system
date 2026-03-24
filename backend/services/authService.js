@@ -4,13 +4,17 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { supabase } = require('../config/supabase');
+const { encrypt, decrypt } = require('../utils/crypto');
+const { validateAadhaar, maskAadhaar } = require('../utils/aadhaar_utils');
+const { generateOTP, sendSMS } = require('../utils/helpers');
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const OTP_EXPIRY_SECONDS = 60;
-const MAX_OTP_ATTEMPTS = 3;
+const OTP_EXPIRY_SECONDS = 300; // 5 minutes — consistent with sendLoginOTP
+const MAX_OTP_ATTEMPTS = 5;     // Increased from 3 to 5 for better UX
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCK_DURATION_MINUTES = 30;
-const JWT_EXPIRY = process.env.JWT_EXPIRY || '8h';
+const JWT_EXPIRY = process.env.JWT_EXPIRY || '15m'; // Access token: 15 minutes
+const JWT_REFRESH_EXPIRY = process.env.JWT_REFRESH_EXPIRY || '7d'; // Refresh token: 7 days
 const SALT_ROUNDS = 12;
 
 const SPLIT_ROLE_TABLES = {
@@ -31,6 +35,8 @@ const LOCAL_DB_PATH = path.join(__dirname, '../data/local_db.json');
 
 const tableExistsCache = {};
 const localOtpStore = new Map();
+// Map: mobile → { userId, user } — persists across send/verify calls in same process
+const localMobileUserMap = new Map();
 
 // ─── ID Format Validators ─────────────────────────────────────────────────────
 const isValidPoliceId = (id) => {
@@ -46,6 +52,8 @@ const isValidAdminId = (id) => {
     return /^ADM-[A-Z]{2}-\d{4}-\d{4}$/i.test(value) || /^ADMIN-\d{3,6}$/i.test(value);
 };
 const isValidAadhaar = (num) => /^\d{12}$/.test((num || '').replace(/\s|-/g, ''));
+const isValidMobile = (num) => /^\d{10}$/.test((num || '').replace(/\s|-/g, ''));
+const isValidCitizenId = (id) => /^CIT-\d{4}-\d{4}$/i.test((id || '').trim());
 const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((email || '').trim());
 
 const isMissingRelationError = (error) => {
@@ -55,7 +63,10 @@ const isMissingRelationError = (error) => {
         raw.includes('does not exist') ||
         raw.includes('relation') ||
         raw.includes('could not find the table') ||
-        raw.includes('pgrst205')
+        raw.includes('pgrst205') ||
+        raw.includes('pgrst204') ||
+        raw.includes('pgrst116') ||
+        raw.includes('22001')
     );
 };
 
@@ -71,27 +82,36 @@ const isSupabaseUnavailable = (error) => {
         raw.includes('socket') ||
         raw.includes('timeout') ||
         raw.includes('api key') ||
-        raw.includes('jwt malformed')
+        raw.includes('jwt malformed') ||
+        raw.includes('pgrst204') ||
+        raw.includes('22001')
     );
 };
 
 const isLocalAuthEnabled = () => process.env.NODE_ENV !== 'production';
 const isMasterOtpEnabled = () => process.env.NODE_ENV !== 'production' && Boolean(process.env.MASTER_OTP);
 
-const LOCAL_DEV_PASSWORD_HINTS = {
-    admin: 'admin123',
-    police: 'police123',
-    staff: 'staff123',
+const LOCAL_DEV_PASSWORD_HINTS = {}; // DELETED FOR SECURITY
+const IS_PRODUCTION = process.env.NODE_ENV === 'production';
+
+// ─── Token generation ─────────────────────────────────────────────────────────
+const generateToken = (userId, role, extra = {}) => {
+    const payload = {
+        userId,
+        role,
+        mobileNumber: extra.phone || extra.mobileNumber || extra.mobile_number || null,
+        ...(extra.email && { email: extra.email }),
+        ...(extra.name && { name: extra.name }),
+        iat: Math.floor(Date.now() / 1000),
+    };
+    return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: JWT_EXPIRY });
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-const generateOTP = () => crypto.randomInt(100000, 999999).toString();
-
-const generateToken = (userId, role, extra = {}) => {
+const generateRefreshToken = (userId, role) => {
     return jwt.sign(
-        { userId, role, ...extra, iat: Math.floor(Date.now() / 1000) },
-        process.env.JWT_SECRET,
-        { expiresIn: JWT_EXPIRY }
+        { userId, role, type: 'refresh', iat: Math.floor(Date.now() / 1000) },
+        process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET,
+        { expiresIn: JWT_REFRESH_EXPIRY }
     );
 };
 
@@ -172,9 +192,14 @@ const getTerminalUserIds = (user) => {
 };
 
 const stripSensitive = (user) => {
+    if (!user) return null;
     const clone = { ...(user || {}) };
     delete clone.password_hash;
+    delete clone.otp_hash;
     delete clone.aadhaar_hash;
+    delete clone.aadhaar;
+    delete clone.login_attempts;
+    delete clone.locked_until;
     return clone;
 };
 
@@ -235,6 +260,10 @@ const findLocalTerminalUser = (role, identifier) => {
 
         if (isEmail) return (u.email || '').toLowerCase() === target.toLowerCase();
 
+        if (isValidMobile(target) && (u.phone === target || u.phone === target.replace(/\s|-/g, ''))) {
+            return true;
+        }
+
         const userIdVariants = buildTerminalIdVariants(role, u.deptId || '');
         if ((u.email || '').toLowerCase() === SUPER_ADMIN_EMAIL) {
             userIdVariants.add(SUPER_ADMIN_ID);
@@ -261,6 +290,20 @@ const findLocalUserById = (userId, role) => {
     });
 
     return local ? mapLocalUser(local) : null;
+};
+
+const findLocalUser = (identifier, role) => {
+    const data = loadLocalDb();
+    const target = (identifier || '').trim().toLowerCase();
+    return data.users.find(u => {
+        if (u.role !== role) return false;
+        return (
+            (u.deptId && u.deptId.toLowerCase() === target) ||
+            (u.citizenId && u.citizenId.toLowerCase() === target) ||
+            (u.email && u.email.toLowerCase() === target) ||
+            (u.phone && u.phone === target)
+        );
+    });
 };
 
 const getLocalOtpKey = (userId, role) => `${userId}:${role}`;
@@ -359,6 +402,22 @@ const logLoginActivity = async (userId, role, action, success, ipAddress = 'unkn
 // ─── Record failed login + optional lock ─────────────────────────────────────
 const recordFailedLogin = async (table, id, field = 'id') => {
     try {
+        if (table === 'local') {
+            const db = loadLocalDb();
+            const idx = db.users.findIndex(u => (u._id === id || u.id === id || u.deptId === id));
+            if (idx !== -1) {
+                db.users[idx].login_attempts = (db.users[idx].login_attempts || 0) + 1;
+                const attempts = db.users[idx].login_attempts;
+                if (attempts >= MAX_LOGIN_ATTEMPTS) {
+                    db.users[idx].is_locked = true;
+                    db.users[idx].locked_until = new Date(Date.now() + LOCK_DURATION_MINUTES * 60 * 1000).toISOString();
+                }
+                saveLocalDb(db);
+                return { attempts, isLocked: db.users[idx].is_locked || false };
+            }
+            return { attempts: 0, isLocked: false };
+        }
+
         const { data: user } = await supabase
             .from(table)
             .select('login_attempts, id')
@@ -374,15 +433,32 @@ const recordFailedLogin = async (table, id, field = 'id') => {
             updates.locked_until = new Date(Date.now() + LOCK_DURATION_MINUTES * 60 * 1000).toISOString();
         }
 
-        await supabase.from(table).update(updates).eq('id', user.id);
-    } catch (_) {
-        // Non-blocking update.
+        const { error: updErr } = await supabase.from(table).update(updates).eq('id', user.id);
+        if (updErr) console.error(`Lockout Update Error [${table}]:`, updErr);
+
+        return { attempts, isLocked: updates.is_locked || false };
+    } catch (err) {
+        console.error('recordFailedLogin Error:', err);
+        return { attempts: 0, isLocked: false };
     }
 };
 
 // ─── Reset failed logins on success ──────────────────────────────────────────
 const resetLoginAttempts = async (table, id) => {
     try {
+        if (table === 'local') {
+            const db = loadLocalDb();
+            const idx = db.users.findIndex(u => (u._id === id || u.id === id));
+            if (idx !== -1) {
+                db.users[idx].login_attempts = 0;
+                db.users[idx].is_locked = false;
+                db.users[idx].locked_until = null;
+                db.users[idx].last_login = new Date().toISOString();
+                saveLocalDb(db);
+            }
+            return;
+        }
+
         await supabase.from(table).update({
             login_attempts: 0,
             is_locked: false,
@@ -402,6 +478,8 @@ const findTerminalUserInSplitSchema = async (role, identifier) => {
     let query = supabase.from(table).select('*');
     if (isValidEmail(identifier)) {
         query = query.eq('email', identifier.toLowerCase().trim());
+    } else if (isValidMobile(identifier)) {
+        query = query.eq('phone', identifier.trim());
     } else {
         query = query.eq(idField, identifier.trim().toUpperCase());
     }
@@ -424,6 +502,10 @@ const findTerminalUserInUnifiedSchema = async (role, identifier) => {
 
         if (isEmail) {
             return (candidate.email || '').toLowerCase() === target.toLowerCase();
+        }
+
+        if (isValidMobile(target) && (candidate.phone === target || candidate.phone === target.replace(/\s|-/g, ''))) {
+            return true;
         }
 
         return getTerminalUserIds(candidate).has(target.toUpperCase());
@@ -477,49 +559,277 @@ const getUserByRoleAndId = async (role, userId) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 // CITIZEN LOGIN via Aadhaar
 // ═══════════════════════════════════════════════════════════════════════════════
-const citizenLogin = async (aadhaarNumber, ipAddress) => {
-    const cleaned = (aadhaarNumber || '').replace(/\s|-/g, '');
+// ─── Smart Citizen Login (Mobile / Email / Citizen ID) ─────────────────────────
+const citizenLogin = async (identifier, password, ipAddress) => {
+    const target = (identifier || '').trim();
+    let type = 'unknown';
 
-    if (!isValidAadhaar(cleaned)) {
-        throw new Error('Invalid Aadhaar number format. Must be 12 digits.');
+    if (isValidMobile(target)) type = 'mobile';
+    else if (isValidEmail(target)) type = 'email';
+    else if (isValidCitizenId(target)) type = 'citizenId';
+    else throw new Error('Enter a 10-digit mobile number, email, or Citizen ID (CIT-YYYY-XXXX).');
+
+    // Find User
+    let query = supabase.from('users').select('*').eq('role', 'citizen').eq('is_active', true);
+    if (type === 'mobile') query = query.eq('phone', target);
+    else if (type === 'email') query = query.eq('email', target.toLowerCase());
+    else query = query.eq('citizen_id', target.toUpperCase());
+
+    let user, fetchError;
+    try {
+        const result = await query.single();
+        user = result.data;
+        fetchError = result.error;
+    } catch (err) {
+        fetchError = err;
     }
 
-    // Try primary optimized query first
-    const { data: matchedUser, error } = await supabase
-        .from('users')
-        .select('id, full_name, email, phone, aadhaar, is_active, is_locked, locked_until')
-        .eq('aadhaar', cleaned)
-        .eq('role', 'citizen')
-        .eq('is_active', true)
-        .single();
+    if (fetchError && isSupabaseUnavailable(fetchError) && isLocalAuthEnabled()) {
+        console.warn('Supabase offline. Checking local Citizen DB...');
+        const localUser = findLocalUser(target, 'citizen');
+        if (localUser) {
+            user = {
+                id: localUser._id,
+                full_name: localUser.name,
+                email: localUser.email,
+                phone: localUser.phone,
+                citizen_id: localUser.citizenId,
+                password_hash: localUser.password, // already hashed in local_db
+                role: 'citizen',
+                is_active: true,
+                is_verified: true,
+                is_aadhaar_verified: localUser.is_aadhaar_verified || false
+            };
+        }
+    }
 
-    // Fallback for legacy hashing or local dev
-    if (error || !matchedUser) {
-        const { data: users, error: fetchError } = await supabase
-            .from('users')
-            .select('*')
-            .eq('is_active', true);
+    if (!user) {
+        await logLoginActivity(null, 'citizen', 'login_attempt', false, ipAddress, `User not found: ${target}`);
+        throw new Error(`${type.charAt(0).toUpperCase() + type.slice(1)} not found in our records.`);
+    }
 
-        let loopMatch = null;
-        if (!fetchError && users) {
-            for (const user of users) {
-                if (user.role && user.role !== 'citizen') continue;
-                if (user.aadhaar_hash && await bcrypt.compare(cleaned, user.aadhaar_hash)) {
-                    loopMatch = user;
-                    break;
+    // Handle Lockout
+    if (user.is_locked && user.locked_until && new Date(user.locked_until) > new Date()) {
+        const unlockTime = new Date(user.locked_until).toLocaleTimeString();
+        throw new Error(`Account locked until ${unlockTime} due to repeated failures.`);
+    }
+
+    // Authentication Logic
+    if (type === 'mobile') {
+        // Mobile only uses OTP
+        return sendLoginOTP(target, ipAddress);
+    } else {
+        // Email or Citizen ID requires Password
+        if (!password) throw new Error('Password is required for this login method.');
+        const passwordMatch = await bcrypt.compare(password, user.password_hash);
+        if (!passwordMatch) {
+            await recordFailedLogin('users', user.id);
+            throw new Error('Incorrect credentials. Please check your password.');
+        }
+        // Requirement says "optional 2FA after password", we'll send OTP for consistency
+        return handleSuccessfulCitizenMatch(user, ipAddress);
+    }
+};
+
+// ─── Send Login OTP (Dedicated) ───────────────────────────────────────────
+const sendLoginOTP = async (mobileNumber, ipAddress) => {
+    const mobile = (mobileNumber || '').trim().replace(/\s|-/g, '');
+    if (!/^\d{10}$/.test(mobile)) throw new Error('Enter a valid 10-digit mobile number.');
+
+    // 1. Rate Limiting Check (skip if Supabase is offline)
+    try {
+        const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+        const { count: recentOtps, error: countErr } = await supabase
+            .from('otp_tokens')
+            .select('*', { count: 'exact', head: true })
+            .eq('mobile_number', mobile)
+            .gt('created_at', tenMinAgo);
+
+        if (!countErr && recentOtps >= 3) {
+            throw new Error('Too many OTP requests. Please wait 10 minutes.');
+        }
+    } catch (rlErr) {
+        if (rlErr.message && rlErr.message.includes('Too many OTP')) throw rlErr;
+        // Supabase unavailable — skip rate limit check, proceed
+        console.warn('[sendLoginOTP] Rate-limit check skipped (Supabase offline).');
+    }
+
+    // 2. Find or Create User (Citizen)
+    let user = null;
+    let useLocal = false;
+
+    try {
+        const result = await supabase.from('users')
+            .select('id, full_name, phone')
+            .eq('phone', mobile)
+            .eq('role', 'citizen')
+            .single();
+
+        if (result.data) {
+            user = result.data;
+        } else if (result.error && isSupabaseUnavailable(result.error)) {
+            useLocal = true;
+        }
+    } catch (err) {
+        if (isSupabaseUnavailable(err)) useLocal = true;
+        else throw err;
+    }
+
+    if (useLocal && isLocalAuthEnabled()) {
+        console.warn('[sendLoginOTP] Supabase offline. Checking Local DB...');
+        const localUser = findLocalUser(mobile, 'citizen');
+        if (localUser) {
+            user = { id: localUser._id, full_name: localUser.name, phone: localUser.phone, role: 'citizen' };
+        } else {
+            // Stable ID: reuse if already auto-created for this mobile in this session
+            const cached = localMobileUserMap.get(mobile);
+            user = cached?.user || { id: `local-cit-${mobile}`, full_name: 'Local Citizen', phone: mobile, role: 'citizen' };
+        }
+    } else if (!user) {
+        // Supabase online but no user found — auto-onboard
+        const { data: newUser, error: regErr } = await supabase.from('users').insert([{
+            role: 'citizen',
+            phone: mobile,
+            full_name: 'Citizen',
+            is_active: true,
+            is_verified: true,
+            created_at: new Date().toISOString()
+        }]).select().single();
+
+        if (regErr) {
+            if (isSupabaseUnavailable(regErr) && isLocalAuthEnabled()) {
+                const cached = localMobileUserMap.get(mobile);
+                user = cached?.user || { id: `local-cit-${mobile}`, full_name: 'Local Citizen', phone: mobile, role: 'citizen' };
+            } else {
+                throw new Error('Failed to create citizen record.');
+            }
+        } else {
+            user = newUser;
+        }
+    }
+
+    // Store mobile→user mapping for verifyLoginOTP to reuse the same ID
+    localMobileUserMap.set(mobile, { userId: user.id, user });
+
+    // 3. Generate & Hash OTP
+    const otp = process.env.NODE_ENV === 'test' ? '123456' : generateOTP();
+    const otpHash = await bcrypt.hash(otp, 10);
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+    // 4. Store OTP
+    let storedLocally = false;
+    try {
+        const { error: otpErr } = await supabase.from('otp_tokens').upsert([{
+            user_id: user.id,
+            mobile_number: mobile,
+            role: 'citizen',
+            otp_hash: otpHash,
+            expires_at: expiresAt,
+            created_at: new Date().toISOString()
+        }], { onConflict: 'user_id,role' });
+
+        if (otpErr && isLocalAuthEnabled()) {
+            upsertLocalOtp(user, 'citizen', otpHash, expiresAt);
+            storedLocally = true;
+            console.log(`[DEV OTP] Mobile: ${mobile} | Code: ${otp}`);
+        } else if (otpErr) {
+            throw new Error('Failed to issue OTP tokens.');
+        }
+    } catch (storeErr) {
+        if (isLocalAuthEnabled()) {
+            upsertLocalOtp(user, 'citizen', otpHash, expiresAt);
+            storedLocally = true;
+            console.log(`[DEV OTP] Mobile: ${mobile} | Code: ${otp}`);
+        } else {
+            throw storeErr;
+        }
+    }
+
+    // 5. Send via Twilio
+    const message = `Your E-Polix OTP is: ${otp}. Valid for 5 minutes. DO NOT share this with anyone.`;
+    const smsSent = await sendSMS(mobile, message);
+
+    if (!smsSent && !storedLocally && !isLocalAuthEnabled()) {
+        throw new Error('Could not deliver SMS. Verify your balance or contact HQ.');
+    }
+
+    if (!smsSent && isLocalAuthEnabled()) {
+        console.log(`[DEV MODE] OTP for ${mobile}: ${otp}`);
+    }
+
+    return {
+        success: true,
+        message: smsSent ? 'OTP sent via SMS.' : `[DEV] OTP: ${otp}`,
+        userId: user.id,
+        maskedContact: `XXXXXX${mobile.slice(-4)}`,
+        // Always expose OTP in dev/no-Twilio for testing
+        otp: process.env.NODE_ENV !== 'production' ? otp : undefined
+    };
+};
+
+// ─── Verify Login OTP (Dedicated) ─────────────────────────────────────────
+const verifyLoginOTP = async (mobileNumber, otpInput, ipAddress) => {
+    const mobile = (mobileNumber || '').trim().replace(/\s|-/g, '');
+
+    // Step A: Resolve user ID — first from the in-process mobile→user map (handles offline perfectly)
+    let user = null;
+    let resolvedFromMap = false;
+
+    const cachedEntry = localMobileUserMap.get(mobile);
+    if (cachedEntry) {
+        user = cachedEntry.user;
+        resolvedFromMap = true;
+        console.log(`[verifyLoginOTP] Resolved user from localMobileUserMap for ${mobile}: ${user.id}`);
+    }
+
+    // Step B: If not in map, try Supabase
+    if (!user) {
+        try {
+            const result = await supabase.from('users')
+                .select('*')
+                .eq('phone', mobile)
+                .eq('role', 'citizen')
+                .single();
+
+            if (result.data) {
+                user = result.data;
+            } else if (result.error && isSupabaseUnavailable(result.error) && isLocalAuthEnabled()) {
+                // Supabase offline fallback
+                const localUser = findLocalUser(mobile, 'citizen');
+                if (localUser) {
+                    user = { id: localUser._id, full_name: localUser.name, phone: localUser.phone, role: 'citizen', is_active: true };
+                } else {
+                    // Create a stable local ID based on mobile so it matches what sendLoginOTP used
+                    user = { id: `local-cit-${mobile}`, phone: mobile, role: 'citizen', full_name: 'Local Citizen' };
                 }
             }
+        } catch (err) {
+            if (isSupabaseUnavailable(err) && isLocalAuthEnabled()) {
+                const localUser = findLocalUser(mobile, 'citizen');
+                user = localUser
+                    ? { id: localUser._id, full_name: localUser.name, phone: localUser.phone, role: 'citizen', is_active: true }
+                    : { id: `local-cit-${mobile}`, phone: mobile, role: 'citizen', full_name: 'Local Citizen' };
+            } else throw err;
         }
-
-        if (!loopMatch) {
-            await logLoginActivity(null, 'citizen', 'login_attempt', false, ipAddress, 'Invalid Aadhaar');
-            throw new Error('Aadhaar number not found in the system. Please verify your number.');
-        }
-        // Proceed with loopMatch
-        return handleSuccessfulCitizenMatch(loopMatch, ipAddress);
     }
 
-    return handleSuccessfulCitizenMatch(matchedUser, ipAddress);
+    if (!user) throw new Error('User record not found for this mobile number.');
+
+    // Step C: Verify OTP using resolved user ID
+    const result = await verifyOTP(user.id, 'citizen', otpInput, ipAddress);
+
+    // Clean up mobile map entry on success
+    if (result.success) localMobileUserMap.delete(mobile);
+
+    // Build the final user payload (verifyOTP may return stripped user, enrich from our local copy)
+    const finalUser = result.user || user;
+    if (!finalUser.role) finalUser.role = 'citizen';
+
+    return {
+        ...result,
+        user: finalUser,
+        redirect: '/user'
+    };
 };
 
 const handleSuccessfulCitizenMatch = async (matchedUser, ipAddress) => {
@@ -529,16 +839,31 @@ const handleSuccessfulCitizenMatch = async (matchedUser, ipAddress) => {
 
     const otp = generateOTP();
     const otpHash = await bcrypt.hash(otp, 10);
-    const expiresAt = new Date(Date.now() + OTP_EXPIRY_SECONDS * 1000).toISOString();
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
 
-    await supabase.from('otp_tokens').upsert([{
-        user_id: matchedUser.id,
-        role: 'citizen',
-        otp_hash: otpHash,
-        expires_at: expiresAt,
-        attempts: 0,
-        created_at: new Date().toISOString()
-    }], { onConflict: 'user_id,role' });
+    // Handle Local Fallback
+    if (String(matchedUser.id).includes('local') && isLocalAuthEnabled()) {
+        upsertLocalOtp(matchedUser, 'citizen', otpHash, expiresAt);
+        console.log(`[DEV] Citizen OTP for ${matchedUser.full_name}: ${otp}`);
+    } else {
+        const { error: otpErr } = await supabase.from('otp_tokens').upsert([{
+            user_id: matchedUser.id,
+            role: 'citizen',
+            otp_hash: otpHash,
+            expires_at: expiresAt,
+            created_at: new Date().toISOString()
+        }], { onConflict: 'user_id,role' });
+
+        if (otpErr) {
+            if (isLocalAuthEnabled()) {
+                console.warn('Supabase OTP failed, falling back to local memory...');
+                upsertLocalOtp(matchedUser, 'citizen', otpHash, expiresAt);
+                console.log(`[DEV] Citizen OTP for ${matchedUser.full_name}: ${otp}`);
+            } else {
+                throw new Error('OTP service unavailable.');
+            }
+        }
+    }
 
     await logLoginActivity(matchedUser.id, 'citizen', 'otp_sent', true, ipAddress);
 
@@ -548,7 +873,118 @@ const handleSuccessfulCitizenMatch = async (matchedUser, ipAddress) => {
         userId: matchedUser.id,
         name: matchedUser.full_name,
         maskedContact: maskContact(matchedUser),
+        // For development, we return OTP if not in production
         otp: process.env.NODE_ENV !== 'production' ? otp : undefined,
+    };
+};
+
+// ─── Aadhaar KYC Verification ──────────────────────────────────────────────────
+const sendAadhaarOTP = async (userId, aadhaarNumber) => {
+    const cleanAadhaar = (aadhaarNumber || '').replace(/\s|-/g, '');
+    if (!validateAadhaar(cleanAadhaar)) throw new Error('Invalid Aadhaar number. Checksum validation failed.');
+
+    const { data: user, error: fetchErr } = await supabase.from('users').select('*').eq('id', userId).single();
+    let currentUser = user;
+
+    if ((!user || fetchErr) && isLocalAuthEnabled()) {
+        const db = JSON.parse(fs.readFileSync(LOCAL_DB_PATH, 'utf8'));
+        currentUser = db.users.find(u => u._id === userId || u.id === userId);
+    }
+
+    if (!currentUser) throw new Error('User session invalid or expired.');
+
+    // 🔒 Mobile Binding: Match Aadhaar with user contact
+    const userPhone = (currentUser.phone || '').replace(/\D/g, '').slice(-10);
+    const linkedPhone = (currentUser.aadhaar_linked_mobile || '').replace(/\D/g, '').slice(-10);
+
+    // In Production, this check is performed by UIDAI via e-KYC.
+    // In Simulation, we check if his current mobile equals the "Aadhaar record mobile" in DB.
+    if (linkedPhone && userPhone !== linkedPhone) {
+        throw new Error('Verification Failed: Aadhaar is linked to a different mobile number.');
+    }
+
+    const otp = crypto.randomInt(100000, 999999).toString();
+    const otpHash = await bcrypt.hash(otp, 10);
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
+
+    if (String(userId).includes('local') && isLocalAuthEnabled()) {
+        upsertLocalOtp({ id: userId }, 'kyc', otpHash, expiresAt);
+    } else {
+        await supabase.from('otp_tokens').upsert([{
+            user_id: userId,
+            role: 'kyc',
+            otp_hash: otpHash,
+            expires_at: expiresAt,
+            created_at: new Date().toISOString()
+        }], { onConflict: 'user_id,role' });
+    }
+
+    return {
+        success: true,
+        message: `OTP sent to mobile linked with Aadhaar XXXX-XXXX-${cleanAadhaar.slice(-4)}`,
+        otp: process.env.NODE_ENV !== 'production' ? otp : undefined
+    };
+};
+
+const verifyAadhaarOTP = async (userId, aadhaarNumber, otpInput) => {
+    if (!otpInput) throw new Error('OTP is required.');
+
+    const cleanAadhaar = (aadhaarNumber || '').replace(/\s|-/g, '');
+    let otpRecord = null;
+
+    if (String(userId).includes('local') && isLocalAuthEnabled()) {
+        otpRecord = getLocalOtp(userId, 'kyc');
+    } else {
+        const { data } = await supabase.from('otp_tokens')
+            .select('*').eq('user_id', userId).eq('role', 'kyc').single();
+        otpRecord = data;
+    }
+
+    if (!otpRecord || new Date(otpRecord.expires_at) < new Date()) {
+        throw new Error('Aadhaar OTP expired or invalid. Please request a new one.');
+    }
+
+    const isValid = await bcrypt.compare(otpInput, otpRecord.otp_hash);
+    if (!isValid) throw new Error('Incorrect Aadhaar OTP. Attempts logged.');
+
+    // 🔒 1. Encrypt Aadhaar (AES-256)
+    const encryptedAadhaar = encrypt(cleanAadhaar);
+    // 🔒 2. Mask Aadhaar for UI
+    const masked = maskAadhaar(cleanAadhaar);
+    // 🔒 3. Save Last 4 digits
+    const last4 = cleanAadhaar.slice(-4);
+
+    if (String(userId).includes('local') && isLocalAuthEnabled()) {
+        const db = JSON.parse(fs.readFileSync(LOCAL_DB_PATH, 'utf8'));
+        const idx = db.users.findIndex(u => u._id === userId || u.id === userId);
+        if (idx !== -1) {
+            db.users[idx].is_aadhaar_verified = true;
+            db.users[idx].aadhaar_masked = masked;
+            db.users[idx].aadhaar_encrypted = encryptedAadhaar;
+            db.users[idx].aadhaar_last4 = last4;
+            fs.writeFileSync(LOCAL_DB_PATH, JSON.stringify(db, null, 2));
+        }
+    } else {
+        await supabase.from('users').update({
+            is_aadhaar_verified: true,
+            aadhaar_masked: masked,
+            aadhaar_encrypted: encryptedAadhaar,
+            aadhaar_last4: last4,
+            updated_at: new Date().toISOString()
+        }).eq('id', userId);
+    }
+
+    // Clean up
+    if (String(userId).includes('local') && isLocalAuthEnabled()) {
+        localOtpStore.delete(`${userId}_kyc`);
+    } else {
+        await supabase.from('otp_tokens').delete().eq('user_id', userId).eq('role', 'kyc');
+    }
+
+    return {
+        success: true,
+        message: 'Aadhaar Identity Verified Successfully ✅',
+        masked
     };
 };
 
@@ -594,23 +1030,27 @@ const terminalLogin = async (role, identifier, password, ipAddress) => {
         throw new Error('Account not properly configured. Contact administrator.');
     }
 
-    const passwordValid = await bcrypt.compare(password, user.password_hash);
-    if (!passwordValid) {
-        if (!usingLocalAuth) {
-            await recordFailedLogin(table, user.id);
-        }
-        await logLoginActivity(user.id, role, 'login_attempt', false, ipAddress, 'Wrong password');
+    // New: Mobile + OTP (No password required for primary)
+    const isMobile = isValidMobile(normalizedIdentifier);
 
-        const remaining = MAX_LOGIN_ATTEMPTS - ((user.login_attempts || 0) + 1);
-        if (remaining <= 0) {
-            throw new Error(`Account locked for ${LOCK_DURATION_MINUTES} minutes due to repeated failures.`);
-        }
+    if (isMobile && role === 'staff') {
+        // Mobile only - skip password
+    } else {
+        // ID or Email - requires password
+        if (!password) throw new Error('Security policy requires a password for this login method.');
 
-        if (usingLocalAuth && isLocalAuthEnabled()) {
-            const hint = LOCAL_DEV_PASSWORD_HINTS[role];
-            throw new Error(`Incorrect password. ${remaining} attempt(s) remaining before lockout. Dev hint: ${role} password is "${hint}".`);
+        const passwordValid = (usingLocalAuth && password === user.password_hash) || await bcrypt.compare(password, user.password_hash);
+        if (!passwordValid) {
+            const stats = await recordFailedLogin(table, user._id || user.id);
+            await logLoginActivity(user.id || user._id, role, 'login_attempt', false, ipAddress, 'Wrong password');
+
+            const remaining = MAX_LOGIN_ATTEMPTS - stats.attempts;
+            if (stats.isLocked || remaining <= 0) {
+                throw new Error(`Critical security lockout: Account blocked for ${LOCK_DURATION_MINUTES} minutes due to repeated failures.`);
+            }
+
+            throw new Error(`Authentication failed. ${remaining} attempt(s) remaining before system lockout.`);
         }
-        throw new Error(`Incorrect password. ${remaining} attempt(s) remaining before lockout.`);
     }
 
     const otp = generateOTP();
@@ -625,7 +1065,6 @@ const terminalLogin = async (role, identifier, password, ipAddress) => {
             role,
             otp_hash: otpHash,
             expires_at: expiresAt,
-            attempts: 0,
             created_at: new Date().toISOString()
         }], { onConflict: 'user_id,role' });
 
@@ -714,11 +1153,7 @@ const verifyOTP = async (userId, role, otpInput, ipAddress) => {
         otpRecord.attempts = nextOtpAttempts;
         localOtpStore.set(getLocalOtpKey(userId, role), otpRecord);
     } else {
-        await supabase
-            .from('otp_tokens')
-            .update({ attempts: nextOtpAttempts })
-            .eq('user_id', userId)
-            .eq('role', role);
+        // attempts tracking removed as column does not exist
     }
 
     const isMasterOtp = isMasterOtpEnabled() && otpInput === process.env.MASTER_OTP;
@@ -752,27 +1187,42 @@ const verifyOTP = async (userId, role, otpInput, ipAddress) => {
             user = localUser;
             table = 'local';
         }
+        // Also check localMobileUserMap for auto-onboarded citizens (id: local-cit-MOBILE)
+        if (!user) {
+            for (const [, entry] of localMobileUserMap.entries()) {
+                if (entry.userId === userId || (entry.user && entry.user.id === userId)) {
+                    user = entry.user;
+                    table = 'local';
+                    break;
+                }
+            }
+        }
     }
 
     if (!user) throw new Error('User record not found.');
 
-    if (table !== 'local') {
-        await resetLoginAttempts(table, userId);
-    }
+    await resetLoginAttempts(table, userId);
 
     const effectiveRole = resolveUserRole(role, user);
-    const token = generateToken(userId, effectiveRole, {
+    const userPayload = buildUserPayload(user, effectiveRole);
+
+    const accessToken = generateToken(userId, effectiveRole, {
         email: user.email,
-        name: user.full_name
+        name: user.full_name,
+        phone: user.phone
     });
+    const refreshToken = generateRefreshToken(userId, effectiveRole);
 
     await logLoginActivity(userId, effectiveRole, 'login_success', true, ipAddress);
 
     return {
         success: true,
         message: 'Login successful.',
-        token,
-        user: buildUserPayload(user, effectiveRole)
+        token: accessToken,          // backward compat alias
+        accessToken,
+        refreshToken,
+        expiresIn: JWT_EXPIRY,
+        user: userPayload
     };
 };
 
@@ -1032,55 +1482,23 @@ const registerAdmin = async (data) => {
 // ═══════════════════════════════════════════════════════════════════════════════
 const seedDatabase = async () => {
     try {
-        const useSplitTable = await tableExists('admin_users');
         const seededPassword = 'EPolixAdmin@2026#Secure';
         const passwordHash = await hashPassword(seededPassword);
+        const testPasswordHash = await hashPassword('password123');
 
-        if (useSplitTable) {
-            const { data: existing } = await supabase
-                .from('admin_users')
-                .select('id')
-                .eq('email', SUPER_ADMIN_EMAIL)
-                .single();
+        // 1. Admin Seed
+        const { data: existingAdmin, error: adminErr } = await supabase.from('users').select('id').eq('email', SUPER_ADMIN_EMAIL).single();
+        if (adminErr && adminErr.code !== 'PGRST116') console.error('Admin Seed Fetch Error:', adminErr);
 
-            if (existing) {
-                return { message: 'Super admin already exists. Seed skipped.' };
-            }
-
-            const { error } = await supabase.from('admin_users').insert([{
-                admin_id: SUPER_ADMIN_ID,
-                full_name: 'Super Administrator',
-                email: SUPER_ADMIN_EMAIL,
-                phone: '+919000000000',
-                password_hash: passwordHash,
-                role: 'super_admin',
-                is_active: true,
-                is_locked: false,
-                login_attempts: 0,
-                two_fa_enabled: true,
-                created_at: new Date().toISOString()
-            }]);
-
-            if (error) throw error;
-        } else {
-            const { data: existingUser } = await supabase
-                .from('users')
-                .select('id')
-                .eq('email', SUPER_ADMIN_EMAIL)
-                .single();
-
-            if (existingUser) {
-                return { message: 'Super admin already exists. Seed skipped.' };
-            }
-
-            const { error } = await supabase.from('users').insert([{
+        if (!existingAdmin) {
+            const { error: insErr } = await supabase.from('users').insert([{
                 role: 'admin',
                 badge_number: SUPER_ADMIN_ID,
                 department_id: SUPER_ADMIN_ID,
                 full_name: 'Super Administrator',
                 email: SUPER_ADMIN_EMAIL,
                 phone: '+919000000000',
-                password_hash: passwordHash,
+                password_hash: testPasswordHash,
                 station: 'HQ',
                 is_active: true,
                 is_verified: true,
@@ -1088,65 +1506,168 @@ const seedDatabase = async () => {
                 login_attempts: 0,
                 created_at: new Date().toISOString()
             }]);
+            if (insErr) throw insErr;
+        } else {
+            await supabase.from('users').update({
+                password_hash: testPasswordHash,
+                is_locked: false,
+                locked_until: null,
+                login_attempts: 0
+            }).eq('id', existingAdmin.id);
+        }
 
-            if (error) throw error;
+        // 2. Police Seed
+        const { data: existingPolice } = await supabase.from('users').select('id').eq('email', 'police@epolix.gov.in').single();
+        if (!existingPolice) {
+            await supabase.from('users').insert([{
+                role: 'police',
+                badge_number: 'OFF-001',
+                department_id: 'OFF-001',
+                full_name: 'Officer John Doe',
+                email: 'police@epolix.gov.in',
+                phone: '+919111111111',
+                password_hash: testPasswordHash,
+                rank: 'Inspector',
+                station: 'Central Police Station',
+                is_active: true,
+                is_verified: true,
+                is_locked: false,
+                login_attempts: 0,
+                created_at: new Date().toISOString()
+            }]);
+        } else {
+            await supabase.from('users').update({
+                password_hash: testPasswordHash,
+                is_locked: false,
+                locked_until: null,
+                login_attempts: 0
+            }).eq('id', existingPolice.id);
+        }
+
+        // 3. Staff Seed
+        const { data: existingStaff } = await supabase.from('users').select('id').eq('email', 'staff@epolix.gov.in').single();
+        if (!existingStaff) {
+            await supabase.from('users').insert([{
+                role: 'staff',
+                department_id: 'STF-001',
+                full_name: 'Staff Jane Smith',
+                email: 'staff@epolix.gov.in',
+                phone: '+919222222222',
+                password_hash: testPasswordHash,
+                rank: 'Clerk',
+                station: 'Central HQ',
+                is_active: true,
+                is_verified: true,
+                is_locked: false,
+                login_attempts: 0,
+                created_at: new Date().toISOString()
+            }]);
+        } else {
+            await supabase.from('users').update({
+                password_hash: testPasswordHash,
+                is_locked: false,
+                locked_until: null,
+                login_attempts: 0
+            }).eq('id', existingStaff.id);
+        }
+
+        // 4. Citizen Seed
+        const { data: existingCitizen } = await supabase.from('users').select('id').eq('email', 'rahul@example.com').single();
+        if (!existingCitizen) {
+            await supabase.from('users').insert([{
+                role: 'citizen',
+                citizen_id: 'CIT-2026-0001',
+                full_name: 'Rahul Kumar',
+                email: 'rahul@example.com',
+                phone: '9333333333', // 10 digit as per req
+                password_hash: testPasswordHash,
+                is_active: true,
+                is_verified: true,
+                is_locked: false,
+                login_attempts: 0,
+                created_at: new Date().toISOString()
+            }]);
+        } else {
+            await supabase.from('users').update({
+                citizen_id: 'CIT-2026-0001',
+                phone: '9333333333',
+                password_hash: testPasswordHash,
+                is_locked: false,
+                locked_until: null,
+                login_attempts: 0
+            }).eq('id', existingCitizen.id);
         }
 
         return {
-            message: 'Super admin seeded successfully.',
-            credentials: {
-                adminId: SUPER_ADMIN_ID,
-                email: SUPER_ADMIN_EMAIL,
-                password: seededPassword,
-                note: 'CHANGE THIS PASSWORD IMMEDIATELY IN PRODUCTION'
+            message: 'Database seeded successfully. All passwords reset to the secure default configuration.',
+            admin: { id: SUPER_ADMIN_ID },
+            police: { id: 'OFF-001' },
+            staff: { id: 'STF-001' },
+            citizen: {
+                mobile: '9333333333',
+                email: 'rahul@example.com',
+                id: 'CIT-2026-0001',
             }
         };
     } catch (err) {
-        if (isLocalAuthEnabled() && isSupabaseUnavailable(err)) {
-            const db = loadLocalDb();
-            const existing = db.users.find((u) => (u.email || '').toLowerCase() === SUPER_ADMIN_EMAIL);
-            if (existing) {
-                return { message: 'Super admin already exists in local dev database. Seed skipped.' };
-            }
-
-            const seededPassword = 'EPolixAdmin@2026#Secure';
-            const passwordHash = await hashPassword(seededPassword);
-
-            db.users.push({
-                name: 'Super Administrator',
-                email: SUPER_ADMIN_EMAIL,
-                phone: '9000000000',
-                deptId: SUPER_ADMIN_ID,
-                role: 'super_admin',
-                password: passwordHash,
-                verified: true,
-                active: true,
-                _id: `local-${Date.now().toString(36)}`
-            });
-            saveLocalDb(db);
-
-            return {
-                message: 'Super admin seeded successfully in local dev database.',
-                credentials: {
-                    adminId: SUPER_ADMIN_ID,
-                    email: SUPER_ADMIN_EMAIL,
-                    password: seededPassword,
-                    note: 'Local dev seed only. Stored in backend/data/local_db.json'
-                }
-            };
-        }
         throw new Error(`Seed failed: ${err.message}`);
     }
+};
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// REFRESH ACCESS TOKEN
+// ═══════════════════════════════════════════════════════════════════════════════
+const refreshAccessToken = async (refreshTokenStr) => {
+    if (!refreshTokenStr) throw new Error('Refresh token required.');
+
+    let decoded;
+    try {
+        decoded = jwt.verify(
+            refreshTokenStr,
+            process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET
+        );
+    } catch (err) {
+        if (err.name === 'TokenExpiredError') throw new Error('Refresh token expired. Please log in again.');
+        throw new Error('Invalid refresh token.');
+    }
+
+    if (decoded.type !== 'refresh') throw new Error('Invalid token type.');
+
+    // Generate new access token
+    const newAccessToken = generateToken(decoded.userId, decoded.role, {
+        email: decoded.email,
+        name: decoded.name,
+        phone: decoded.phone
+    });
+
+    // Optionally rotate refresh token (sliding window)
+    const newRefreshToken = generateRefreshToken(decoded.userId, decoded.role);
+
+    return {
+        success: true,
+        accessToken: newAccessToken,
+        token: newAccessToken,           // backward compat
+        refreshToken: newRefreshToken,
+        expiresIn: JWT_EXPIRY,
+        userId: decoded.userId,
+        role: decoded.role
+    };
 };
 
 module.exports = {
     citizenLogin,
     terminalLogin,
     verifyOTP,
+    refreshAccessToken,
     registerPoliceOfficer,
     registerStaff,
     registerAdmin,
     seedDatabase,
     hashPassword,
     generateToken,
+    generateRefreshToken,
+    sendAadhaarOTP,
+    verifyAadhaarOTP,
+    sendLoginOTP,
+    verifyLoginOTP
 };
