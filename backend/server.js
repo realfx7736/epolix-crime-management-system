@@ -105,11 +105,12 @@ app.use('/api/admin', require('./routes/admin'));
 app.get('/api/health', async (req, res) => {
     let dbStatus = 'waiting';
     let errorDetail = null;
-    const sUrl = process.env.SUPABASE_URL || 'not-set';
+    const env = require('./config/env');
+    const sUrl = env.SUPABASE_URL || 'not-set';
 
     try {
         const { supabase } = require('./config/supabase');
-        const { error, data } = await supabase.from('crime_categories').select('id').limit(1);
+        const { error } = await supabase.from('crime_categories').select('id').limit(1);
         if (error) {
             dbStatus = 'failed';
             errorDetail = error;
@@ -126,10 +127,10 @@ app.get('/api/health', async (req, res) => {
         status: dbStatus === 'connected' ? 'operational' : 'degraded',
         database: {
             status: dbStatus,
-            url_configured: sUrl !== 'not-set',
+            url_configured: !!sUrl,
             url_preview: sUrl.length > 10 ? `${sUrl.substring(0, 12)}...` : sUrl,
-            s_key_len: (process.env.SUPABASE_SERVICE_ROLE_KEY || '').length,
-            a_key_len: (process.env.SUPABASE_ANON_KEY || '').length,
+            s_key_len: (env.SUPABASE_SERVICE_ROLE_KEY || '').length,
+            a_key_len: (env.SUPABASE_ANON_KEY || '').length,
             error: errorDetail
         },
         service: 'E-POLIX Backend API v2.0',
