@@ -4,7 +4,15 @@
  * white spaces or quotes which often occur during cloud deployment.
  */
 
-const clean = (val) => (val || '').trim().replace(/^["']/, '').replace(/["']$/, '');
+const clean = (val) => {
+    if (!val) return '';
+    let result = val.trim();
+    // Strip accidental wrapping quotes (single or double)
+    if ((result.startsWith('"') && result.endsWith('"')) || (result.startsWith("'") && result.endsWith("'"))) {
+        result = result.substring(1, result.length - 1);
+    }
+    return result.trim();
+};
 
 module.exports = {
     // Supabase
