@@ -128,6 +128,8 @@ app.get('/api/health', async (req, res) => {
             status: dbStatus,
             url_configured: sUrl !== 'not-set',
             url_preview: sUrl.length > 10 ? `${sUrl.substring(0, 12)}...` : sUrl,
+            s_key_len: (process.env.SUPABASE_SERVICE_ROLE_KEY || '').length,
+            a_key_len: (process.env.SUPABASE_ANON_KEY || '').length,
             error: errorDetail
         },
         service: 'E-POLIX Backend API v2.0',
