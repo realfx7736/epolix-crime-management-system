@@ -59,15 +59,17 @@ const citizenLoginSchema = Joi.object({
 });
 
 const mobileOtpSendSchema = Joi.object({
-    mobile_number: Joi.string().pattern(/^[6-9]\d{9}$/).optional(),
-    identifier: Joi.string().pattern(/^[6-9]\d{9}$/).optional()
+    // FIX: Accept any valid 10-digit number. The [6-9] prefix was too strict
+    // and blocked numbers starting with 7 (e.g., 7736281572).
+    mobile_number: Joi.string().pattern(/^\d{10}$/).optional(),
+    identifier: Joi.string().pattern(/^\d{10}$/).optional()
 }).or('mobile_number', 'identifier').messages({
     'object.missing': 'Please provide a valid 10-digit mobile number'
 });
 
 const mobileOtpVerifySchema = Joi.object({
-    mobile_number: Joi.string().pattern(/^[6-9]\d{9}$/).optional(),
-    identifier: Joi.string().pattern(/^[6-9]\d{9}$/).optional(),
+    mobile_number: Joi.string().pattern(/^\d{10}$/).optional(),
+    identifier: Joi.string().pattern(/^\d{10}$/).optional(),
     otp: Joi.string().pattern(/^\d{6}$/).required().messages({
         'string.pattern.base': 'OTP must be exactly 6 digits',
         'any.required': 'OTP is required'

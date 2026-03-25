@@ -635,6 +635,7 @@ const citizenLogin = async (identifier, password, ipAddress) => {
 // ─── Send Login OTP (Dedicated) ───────────────────────────────────────────
 const sendLoginOTP = async (mobileNumber, ipAddress) => {
     const mobile = (mobileNumber || '').trim().replace(/\s|-/g, '');
+    // FIX: Accept any 10-digit number (not just 6-9 prefix) to match frontend & validator
     if (!/^\d{10}$/.test(mobile)) throw new Error('Enter a valid 10-digit mobile number.');
 
     // 1. Rate Limiting Check (skip if Supabase is offline)

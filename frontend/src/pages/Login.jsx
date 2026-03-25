@@ -20,7 +20,8 @@ const validators = {
     police: (v) => /^OFF-\d{3,6}$/i.test(v.trim()) || /^POLICE-\d{3,6}$/i.test(v.trim()) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()),
     staff: (v) => /^STF-\d{3,6}$/i.test(v.trim()) || /^STAFF-\d{3,6}$/i.test(v.trim()) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()),
     admin: (v) => /^ADM-[A-Z]{2}-\d{4}-\d{4}$/i.test(v.trim()) || /^ADMIN-\d{3,6}$/i.test(v.trim()) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()),
-    citizen: (v) => /^[6-9]\d{9}$/.test(v.trim().replace(/\s|-/g, '')) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) || /^CIT-\d{4}-\d{4}$/i.test(v.trim()),
+    // FIX: Accept any 10-digit mobile number (including 7xxx/8xxx/9xxx) to match backend validator
+    citizen: (v) => /^\d{10}$/.test(v.trim().replace(/\s|-/g, '')) || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v.trim()) || /^CIT-\d{4}-\d{4}$/i.test(v.trim()),
 };
 const idPlaceholders = {
     police: 'OFF-001 / police@epolix.gov.in',
@@ -101,7 +102,8 @@ const Login = () => {
         setErrorMsg('');
 
         if (role === 'citizen') {
-            const isMobile = /^[6-9]\d{9}$/.test(identifier.trim().replace(/\s|-/g, ''));
+            // FIX: Match the backend validator — any 10-digit number is a mobile
+            const isMobile = /^\d{10}$/.test(identifier.trim().replace(/\s|-/g, ''));
             const isPasswordRequired = !isMobile || identifier.includes('@') || identifier.toUpperCase().startsWith('CIT-');
 
             if (isPasswordRequired && !password) {
@@ -377,7 +379,7 @@ const Login = () => {
                                 {/* Identifier Field */}
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2 block">
-                                        {role === 'citizen' ? 'Aadhaar Number (12 digits)' : role === 'police' ? 'Police ID' : role === 'staff' ? 'Staff ID' : 'Admin ID or Email'}
+                                        {role === 'citizen' ? 'Mobile Number / Email / Citizen ID' : role === 'police' ? 'Police ID' : role === 'staff' ? 'Staff ID' : 'Admin ID or Email'}
                                     </label>
                                     <div className="relative group">
                                         <div className={`absolute left-4 top-1/2 -translate-y-1/2 transition-colors ${identifier ? 'text-blue-400' : 'text-slate-500 group-focus-within:text-blue-400'}`}>
@@ -452,7 +454,7 @@ const Login = () => {
                                         className="flex-1 py-4 rounded-2xl font-bold bg-white/5 text-slate-400 uppercase text-[10px] tracking-widest hover:bg-white/10 transition-all">
                                         Back
                                     </button>
-                                    <button onClick={handleCredentialSubmit} disabled={loading || (role === 'citizen' && idValid === false)}
+                                    <button onClick={handleCredentialSubmit} disabled={loading || (role !== 'citizen' && idValid === false)}
                                         className={`flex-[2] py-4 rounded-2xl font-bold text-white shadow-lg flex items-center justify-center gap-2 transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-60 disabled:hover:scale-100 ${currentRole?.btn}`}>
                                         {loading ? <Activity className="animate-spin" size={18} /> : (role === 'citizen' ? 'Send OTP →' : 'Verify Identity →')}
                                     </button>
