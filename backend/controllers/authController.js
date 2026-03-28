@@ -29,12 +29,13 @@ const citizenLogin = async (req, res) => {
 // ─── Citizen Direct Mobile OTP Flow ───────────────────────────────────────
 const sendLoginOTP = async (req, res) => {
     try {
-        const { mobile_number, identifier } = req.body;
-        const mobile = mobile_number || identifier; // Support both payloads
+        const { mobile_number, identifier, role } = req.body;
+        const mobile = mobile_number || identifier;
+        const targetRole = role || 'citizen';
         if (!mobile) {
             return res.status(400).json({ success: false, error: 'Mobile number is required.' });
         }
-        const result = await authService.sendLoginOTP(mobile, getIp(req));
+        const result = await authService.sendLoginOTP(mobile, getIp(req), targetRole);
         return res.status(200).json(result);
     } catch (err) {
         return res.status(400).json({
@@ -46,12 +47,13 @@ const sendLoginOTP = async (req, res) => {
 
 const verifyLoginOTP = async (req, res) => {
     try {
-        const { mobile_number, identifier, otp } = req.body;
+        const { mobile_number, identifier, otp, role } = req.body;
         const mobile = mobile_number || identifier;
+        const targetRole = role || 'citizen';
         if (!mobile || !otp) {
             return res.status(400).json({ success: false, error: 'Mobile number and OTP are required.' });
         }
-        const result = await authService.verifyLoginOTP(mobile, otp, getIp(req));
+        const result = await authService.verifyLoginOTP(mobile, otp, getIp(req), targetRole);
         return res.status(200).json(result);
     } catch (err) {
         return res.status(401).json({

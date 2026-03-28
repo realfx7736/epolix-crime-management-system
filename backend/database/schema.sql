@@ -80,10 +80,11 @@ CREATE INDEX IF NOT EXISTS idx_users_department_id ON users(department_id);
 CREATE TABLE IF NOT EXISTS otp_tokens (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-    identifier VARCHAR(255) NOT NULL,
-    otp_code VARCHAR(6) NOT NULL,
-    purpose VARCHAR(30) DEFAULT 'login' CHECK (purpose IN ('login', 'register', 'reset_password')),
+    identifier VARCHAR(255) NOT NULL, -- mobile or email
+    otp_hash TEXT NOT NULL,           -- Hashed OTP for security
+    purpose VARCHAR(30) DEFAULT 'login' CHECK (purpose IN ('login', 'register', 'reset_password', 'kyc')),
     is_used BOOLEAN DEFAULT false,
+    attempts_count INTEGER DEFAULT 0,  -- track failed attempts
     expires_at TIMESTAMPTZ NOT NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
