@@ -5,6 +5,7 @@ import {
     ArrowRight, CheckCircle2, AlertCircle, Loader2,
     User, Lock, Eye, EyeOff, Activity
 } from 'lucide-react';
+import { supabase } from '../supabaseClient';
 
 const API_URL = (import.meta.env.VITE_API_URL || 'http://localhost:5000/api').replace(/\/+$/, '');
 
@@ -53,10 +54,27 @@ const OTPAuth = ({ role, onAuthSuccess, onBack }) => {
         setLoading(true);
         try {
             const isCitizen = role === 'citizen';
-            const endpoint = isCitizen ? `${API_URL}/auth/send-otp` : `${API_URL}/auth/terminal/login`;
-            const payload = isCitizen
-                ? { mobile_number: mobile.replace(/\s|-/g, ''), role }
-                : { role, identifier, password };
+
+            if (isCitizen) {
+                const formattedPhone = `+91${mobile.replace(/\s|-/g, '')}`;
+                const { error: supabaseError } = await supabase.auth.signInWithOtp({
+                    phone: formattedPhone
+                });
+
+                if (supabaseError) {
+                    setError(supabaseError.message || 'Service unavailable. Supabase phone auth disabled?');
+                    return;
+                }
+
+                setUserId('supabase');
+                setMaskedMobile(`XXXX${mobile.slice(-4)}`);
+                setStep(2);
+                setTimer(60);
+                return;
+            }
+
+            const endpoint = `${API_URL}/auth/terminal/login`;
+            const payload = { role, identifier, password };
 
             const res = await fetch(endpoint, {
                 method: 'POST',
@@ -70,12 +88,12 @@ const OTPAuth = ({ role, onAuthSuccess, onBack }) => {
                 setMaskedMobile(data.maskedContact || '...XXXX');
                 setStep(2);
                 setTimer(60);
-                if (data.otp) console.log(`[DEV MODE] OTP: ${data.otp}`);
             } else {
                 setError(data.error || 'Authentication failed.');
             }
         } catch (err) {
-            setError('Service unavailable. Please try again.');
+            console.error(err);
+            setError(err.message || 'Service unavailable. Please try again. (Check CORS or Backend URL)');
         } finally {
             setLoading(false);
         }
@@ -89,10 +107,35 @@ const OTPAuth = ({ role, onAuthSuccess, onBack }) => {
         setError('');
         try {
             const isCitizen = role === 'citizen';
-            const endpoint = isCitizen ? `${API_URL}/auth/verify-otp` : `${API_URL}/auth/terminal/verify-otp`;
-            const payload = isCitizen
-                ? { mobile_number: mobile.replace(/\s|-/g, ''), otp: code, role }
-                : { userId, role, otp: code };
+
+            if (isCitizen) {
+                const formattedPhone = `+91${mobile.replace(/\s|-/g, '')}`;
+                const { data: verifyData, error: verifyError } = await supabase.auth.verifyOtp({
+                    phone: formattedPhone,
+                    token: code,
+                    type: 'sms'
+                });
+
+                if (verifyError) {
+                    setError(verifyError.message || 'Invalid security code.');
+                    setOtp(['', '', '', '', '', '']);
+                    otpRefs.current[0]?.focus();
+                    return;
+                }
+
+                onAuthSuccess({
+                    success: true,
+                    user: { role: 'citizen', phone: verifyData.user?.phone, id: verifyData.user?.id, email: verifyData.user?.email },
+                    token: verifyData.session?.access_token,
+                    accessToken: verifyData.session?.access_token,
+                    refreshToken: verifyData.session?.refresh_token,
+                    redirect: '/user'
+                });
+                return;
+            }
+
+            const endpoint = `${API_URL}/auth/terminal/verify-otp`;
+            const payload = { userId, role, otp: code };
 
             const res = await fetch(endpoint, {
                 method: 'POST',
@@ -109,7 +152,8 @@ const OTPAuth = ({ role, onAuthSuccess, onBack }) => {
                 otpRefs.current[0]?.focus();
             }
         } catch (err) {
-            setError('Verification system issue.');
+            console.error(err);
+            setError(err.message || 'Verification system issue.');
         } finally {
             setLoading(false);
         }

@@ -50,6 +50,7 @@ const allowedOrigins = [
     'https://epolix.vercel.app',
     'https://epolix-frontend.vercel.app',
     'https://epolix-crime-management-system.vercel.app',
+    'https://epolix-crime-system.vercel.app',
 ];
 
 app.use(cors({
