@@ -54,27 +54,10 @@ const OTPAuth = ({ role, onAuthSuccess, onBack }) => {
         setLoading(true);
         try {
             const isCitizen = role === 'citizen';
-
-            if (isCitizen) {
-                const formattedPhone = `+91${mobile.replace(/\s|-/g, '')}`;
-                const { error: supabaseError } = await supabase.auth.signInWithOtp({
-                    phone: formattedPhone
-                });
-
-                if (supabaseError) {
-                    setError(supabaseError.message || 'Service unavailable. Supabase phone auth disabled?');
-                    return;
-                }
-
-                setUserId('supabase');
-                setMaskedMobile(`XXXX${mobile.slice(-4)}`);
-                setStep(2);
-                setTimer(60);
-                return;
-            }
-
-            const endpoint = `${API_URL}/auth/terminal/login`;
-            const payload = { role, identifier, password };
+            const endpoint = isCitizen ? `${API_URL}/auth/send-otp` : `${API_URL}/auth/terminal/login`;
+            const payload = isCitizen
+                ? { mobile_number: mobile.replace(/\s|-/g, ''), role }
+                : { role, identifier, password };
 
             const res = await fetch(endpoint, {
                 method: 'POST',
@@ -88,8 +71,9 @@ const OTPAuth = ({ role, onAuthSuccess, onBack }) => {
                 setMaskedMobile(data.maskedContact || '...XXXX');
                 setStep(2);
                 setTimer(60);
+                if (data.otp) console.log(`[DEV MODE] OTP: ${data.otp}`);
             } else {
-                setError(data.error || 'Authentication failed.');
+                setError(data.error || 'Authentication failed. ' + JSON.stringify(data));
             }
         } catch (err) {
             console.error(err);
@@ -107,35 +91,10 @@ const OTPAuth = ({ role, onAuthSuccess, onBack }) => {
         setError('');
         try {
             const isCitizen = role === 'citizen';
-
-            if (isCitizen) {
-                const formattedPhone = `+91${mobile.replace(/\s|-/g, '')}`;
-                const { data: verifyData, error: verifyError } = await supabase.auth.verifyOtp({
-                    phone: formattedPhone,
-                    token: code,
-                    type: 'sms'
-                });
-
-                if (verifyError) {
-                    setError(verifyError.message || 'Invalid security code.');
-                    setOtp(['', '', '', '', '', '']);
-                    otpRefs.current[0]?.focus();
-                    return;
-                }
-
-                onAuthSuccess({
-                    success: true,
-                    user: { role: 'citizen', phone: verifyData.user?.phone, id: verifyData.user?.id, email: verifyData.user?.email },
-                    token: verifyData.session?.access_token,
-                    accessToken: verifyData.session?.access_token,
-                    refreshToken: verifyData.session?.refresh_token,
-                    redirect: '/user'
-                });
-                return;
-            }
-
-            const endpoint = `${API_URL}/auth/terminal/verify-otp`;
-            const payload = { userId, role, otp: code };
+            const endpoint = isCitizen ? `${API_URL}/auth/verify-otp` : `${API_URL}/auth/terminal/verify-otp`;
+            const payload = isCitizen
+                ? { mobile_number: mobile.replace(/\s|-/g, ''), otp: code, role }
+                : { userId, role, otp: code };
 
             const res = await fetch(endpoint, {
                 method: 'POST',
@@ -147,7 +106,7 @@ const OTPAuth = ({ role, onAuthSuccess, onBack }) => {
             if (data.success) {
                 onAuthSuccess(data);
             } else {
-                setError(data.error || 'Invalid security code.');
+                setError(data.error || 'Invalid security code. ' + JSON.stringify(data));
                 setOtp(['', '', '', '', '', '']);
                 otpRefs.current[0]?.focus();
             }
