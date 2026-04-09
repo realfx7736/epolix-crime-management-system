@@ -519,3 +519,6 @@
 {"timestamp":"2026-04-09T11:30:00.036Z","level":"ERROR","message":"Failed to fetch officers.","stack":"Error: Failed to fetch officers.\n    at ApiError.internal (C:\\Users\\Administrator\\Desktop\\E POLIX\\backend\\utils\\ApiError.js:32:16)\n    at AdminService.getAllOfficers (C:\\Users\\Administrator\\Desktop\\E POLIX\\backend\\services\\adminService.js:189:35)\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async getAllOfficers (C:\\Users\\Administrator\\Desktop\\E POLIX\\backend\\controllers\\adminController.js:56:24)","url":"/api/admin/officers","method":"GET","ip":"::1","userId":"37eyb4rmf"}
 {"timestamp":"2026-04-09T11:33:17.000Z","level":"INFO","message":"E-POLIX Backend started on port 5000"}
 {"timestamp":"2026-04-09T11:33:17.559Z","level":"INFO","message":"E-POLIX Backend started on port 5000"}
+{"timestamp":"2026-04-09T11:57:21.419Z","level":"INFO","message":"E-POLIX Backend started on port 5000"}
+{"timestamp":"2026-04-09T13:07:34.713Z","level":"INFO","message":"E-POLIX Backend started on port 5000"}
+{"timestamp":"2026-04-09T13:07:35.569Z","level":"INFO","message":"E-POLIX Backend started on port 5000"}
