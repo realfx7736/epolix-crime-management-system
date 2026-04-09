@@ -1,6 +1,12 @@
 const bcrypt = require('bcryptjs');
 const { supabase } = require('../config/supabase');
 const { generateOTP, sendSMS } = require('../utils/helpers');
+const fs = require('fs');
+const path = require('path');
+
+// Local in-memory store for OTPs when Supabase is unreachable
+const localOtpStore = new Map();
+const isLocalAuthEnabled = () => process.env.NODE_ENV !== 'production';
 
 /**
  * OTP Service for E-POLIX
@@ -49,16 +55,28 @@ const sendOTP = async (mobileNumber, userId, purpose = 'login') => {
 
         if (error) {
             console.error('[OTP Service] DB Error:', error.message);
-            // Fallback: If 'otp_hash' doesn't exist yet, try 'otp_code' (plain)
+            // Fallback 1: Schema mismatch
             if (error.message.includes('otp_hash') || error.message.includes('attempts_count')) {
                 await supabase.from('otp_tokens').insert([{
                     user_id: userId,
                     identifier: mobile,
-                    otp_code: otp, // store plain if hash column missing
+                    otp_code: otp,
                     purpose: purpose,
                     is_used: false,
                     expires_at: expiresAt
                 }]);
+            } else if (isLocalAuthEnabled()) {
+                // Fallback 2: Local Memory Store
+                console.warn('[OTP Service] Falling back to Local Memory Store due to DB error.');
+                localOtpStore.set(`${userId}:${purpose}`, {
+                    otp_hash: otpHash,
+                    otp_code: otp,
+                    identifier: mobile,
+                    expires_at: expiresAt,
+                    created_at: new Date().toISOString(),
+                    is_used: false,
+                    attempts: 0
+                });
             } else {
                 throw new Error('Failed to record OTP in system.');
             }
@@ -103,11 +121,19 @@ const verifyOTP = async (userId, otpInput, purpose = 'login') => {
             .order('created_at', { ascending: false })
             .limit(1);
 
-        if (error || !records || records.length === 0) {
-            throw new Error('OTP not found. Please request a new one.');
+        let otpRecord = null;
+        if (records && records.length > 0) {
+            otpRecord = records[0];
+        } else if (isLocalAuthEnabled()) {
+            const localRecord = localOtpStore.get(`${userId}:${purpose}`);
+            if (localRecord && !localRecord.is_used) {
+                otpRecord = { ...localRecord, id: 'local' };
+            }
         }
 
-        const otpRecord = records[0];
+        if (!otpRecord) {
+            throw new Error('OTP not found. Please request a new one.');
+        }
 
         // 3. Check for expiry
         if (new Date(otpRecord.expires_at) < new Date()) {
@@ -139,9 +165,14 @@ const verifyOTP = async (userId, otpInput, purpose = 'login') => {
         }
 
         // 6. Mark as used on success
-        await supabase.from('otp_tokens')
-            .update({ is_used: true })
-            .eq('id', otpRecord.id);
+        if (otpRecord.id === 'local') {
+            const local = localOtpStore.get(`${userId}:${purpose}`);
+            if (local) local.is_used = true;
+        } else {
+            await supabase.from('otp_tokens')
+                .update({ is_used: true })
+                .eq('id', otpRecord.id);
+        }
 
         return { success: true, message: 'OTP verified successfully.' };
     } catch (err) {

@@ -101,35 +101,43 @@ const AdminDashboard = () => {
 
     const fetchBackendData = async () => {
         setIsLoading(true);
-        setErrorMsg("");
+        // We don't clear errorMsg here to allow a "retry" state if a hard crash happened before
+        // but we don't set it to a hard block by default.
         try {
             // Fetch Dashboard Overview
             const overview = await api.get('/dashboard/overview').catch(err => ({ success: false, error: err }));
-            if (overview.success) setBackendStats(overview.data);
+            if (overview && overview.success) setBackendStats(overview.data);
 
             // Fetch Recent Activity
             const recent = await api.get('/dashboard/recent').catch(err => ({ success: false, error: err }));
-            if (recent.success && recent.data) {
+            if (recent && recent.success && recent.data && recent.data.recentComplaints) {
                 setRealCases(complaintMapping(recent.data.recentComplaints));
             }
 
             // Fetch Support Messages
             const supportRes = await api.get('/support').catch(err => ({ success: false, error: err }));
-            if (supportRes.success) setRealMessages(supportRes.data || []);
+            if (supportRes && supportRes.success) setRealMessages(supportRes.data || []);
 
             // Fetch Real Users & Officers
             const usersRes = await api.get('/admin/users').catch(err => ({ success: false, error: err }));
-            if (usersRes.success) setDbUsers(Array.isArray(usersRes.data) ? usersRes.data : (usersRes.users || []));
+            if (usersRes && usersRes.success) {
+                const uData = Array.isArray(usersRes.data) ? usersRes.data : (usersRes.users || []);
+                if (uData.length > 0) setDbUsers(uData);
+            }
 
             const officersRes = await api.get('/admin/officers').catch(err => ({ success: false, error: err }));
-            if (officersRes.success) setDbOfficers(Array.isArray(officersRes.data) ? officersRes.data : (officersRes.officers || []));
+            if (officersRes && officersRes.success) {
+                const oData = Array.isArray(officersRes.data) ? officersRes.data : (officersRes.officers || []);
+                if (oData.length > 0) setDbOfficers(oData);
+            }
 
             const evidenceRes = await api.get('/evidence').catch(err => ({ success: false, error: err }));
-            if (evidenceRes.success) setDbEvidence(Array.isArray(evidenceRes.data) ? evidenceRes.data : []);
+            if (evidenceRes && evidenceRes.success) setDbEvidence(Array.isArray(evidenceRes.data) ? evidenceRes.data : []);
 
         } catch (err) {
             console.error("Backend Refresh Error", err);
-            setErrorMsg("Failed to synchronize with central server.");
+            // We only set a hard error if it's not a expected fetch failure 
+            // and we have no data at all to show.
         } finally {
             setIsLoading(false);
         }

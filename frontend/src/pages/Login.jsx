@@ -37,7 +37,8 @@ const Login = () => {
             citizen: '/user',
             police: '/police',
             staff: '/staff',
-            admin: '/admin'
+            admin: '/admin',
+            super_admin: '/admin'
         };
         const target = searchParams.get('from') || routeMap[userData.role] || '/';
         navigate(target, { replace: true });
